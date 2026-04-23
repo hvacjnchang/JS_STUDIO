@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>個人財務收支管理系統 (v22 列表精簡版)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --p-margin-top: 10mm;
+            --p-margin-bottom: 10mm;
+            --p-margin-left: 10mm;
+            --p-margin-right: 10mm;
+            --p-font-scale: 1; 
+        }
+
+        body { background-color: #f8f9fa; font-family: "Microsoft JhengHei", sans-serif; }
+        .card { box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: none; margin-bottom: 20px; transition: transform 0.2s; }
+        .balance-card { background: linear-gradient(135deg, #0d6efd, #0dcaf0); color: white; }
+        .income-text { color: #198754; font-weight: bold; }
+        .expense-text { color: #dc3545; font-weight: bold; }
+        .chart-container { position: relative; height: 300px; width: 100%; }
+        
+        .analysis-table-container { 
+            max-height: 300px; 
+            overflow-y: auto; 
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+
+        /* ★★★ 關鍵修改：設定螢幕顯示時的高度限制 (顯示 2 筆) ★★★ */
+        .history-scroll-container {
+            /* Bootstrap table-sm 列高約 40px，Header 約 40px */
+            /* 設定 125px 大約剛好顯示：標題列 + 2 筆資料列 */
+            max-height: 125px; 
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background-color: white;
+            scrollbar-width: thin;
+        }
+        
+        .history-scroll-container thead th {
+            position: sticky; top: 0; z-index: 10; background-color: #e9ecef; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        #importFileInput { display: none; }
+        
+        .search-stats-bar {
+            background-color: #e9ecef; border-radius: 8px; padding: 10px 15px; font-size: 0.95rem; margin-top: 10px;
+        }
+        
+        .dashboard-pct { font-size: 0.9rem; opacity: 0.9; display: block; margin-top: 5px; }
+        .checkbox-dropdown-menu { max-height: 300px; overflow-y: auto; min-width: 100%; }
+        .dropdown-item-text { padding: 0.25rem 1rem; }
+        #categoryDropdownBtn { text-align: left; position: relative; padding-right: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #categoryDropdownBtn::after { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+
+        .print-only-header, .print-only-footer, .print-search-summary { display: none; }
+
+        /* --- 列印模式樣式 --- */
+        @media print {
+            @page { margin: 0; size: auto; }
+
+            body {
+                padding-top: var(--p-margin-top) !important;
+                padding-bottom: var(--p-margin-bottom) !important;
+                padding-left: var(--p-margin-left) !important;
+                padding-right: var(--p-margin-right) !important;
+                background-color: white !important;
+                -webkit-print-color-adjust: exact;
+                zoom: var(--p-font-scale);
+            }
+
+            .navbar, .btn, .no-print, .modal, .modal-backdrop, .nav-tabs, #sortBtn { display: none !important; }
+            #formCard { display: none !important; } 
+            
+            #kpiCard { 
+                display: block !important; border: 1px solid #000 !important; break-inside: avoid; margin-bottom: 20px;
+            }
+            #kpiCard .card-header { background-color: white !important; color: black !important; border-bottom: 1px solid #000 !important; font-weight: bold; }
+            #kpiCard .input-group-text { background: none; border: none; font-weight: bold; padding-left: 0; }
+            #kpiCard input { border: none; background: none; padding-left: 5px; font-weight: bold; }
+
+            #reportSection, #inputSection { width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important; }
+
+            .card { box-shadow: none !important; border: 1px solid #ddd !important; margin-bottom: 15px; break-inside: avoid; }
+            .balance-card { background: white !important; color: black !important; border: 2px solid #0d6efd !important; }
+            .balance-card h2, .balance-card small { color: black !important; }
+
+            .chart-container { height: 200px !important; }
+            .hide-charts-on-print .chart-card { display: none !important; }
+
+            .tab-content > .tab-pane {
+                display: block !important; opacity: 1 !important; visibility: visible !important;
+                margin-bottom: 20px; border-bottom: 1px dashed #ccc; padding-bottom: 15px;
+            }
+            #chartTabs { display: none !important; }
+
+            /* ★★★ 關鍵：列印時強制展開表格，無視 125px 限制 ★★★ */
+            .analysis-table-container, .history-scroll-container { 
+                max-height: none !important; overflow-y: visible !important; border: none !important; display: block !important;
+            }
+            .table-responsive { overflow: visible !important; }
+
+            .print-only-header { display: block !important; text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+            .print-only-footer { display: block !important; position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; font-size: 0.8rem; color: #666; border-top: 1px solid #ddd; padding-top: 5px; background: white; }
+            
+            .print-search-summary { display: block !important; margin-bottom: 15px; border: 1px solid #000; padding: 10px; font-size: 0.9rem; }
+        }
+
+        /* --- 螢幕預覽模式 --- */
+        body.preview-mode {
+            background-color: #555; padding: 20px;
+        }
+        body.preview-mode .container {
+            background-color: white; max-width: 210mm; min-height: 297mm; margin: 0 auto;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            padding-top: var(--p-margin-top) !important;
+            padding-bottom: var(--p-margin-bottom) !important;
+            padding-left: var(--p-margin-left) !important;
+            padding-right: var(--p-margin-right) !important;
+            transform: scale(var(--p-font-scale)); transform-origin: top center;
+        }
+        
+        body.preview-mode .navbar, 
+        body.preview-mode .no-print, 
+        body.preview-mode .nav-tabs, 
+        body.preview-mode #sortBtn,
+        body.preview-mode #formCard,
+        body.preview-mode #chartTabs { display: none !important; }
+
+        body.preview-mode .d-print-block { display: block !important; }
+        body.preview-mode .d-print-none { display: none !important; }
+        body.preview-mode .print-search-summary { display: block !important; margin-bottom: 15px; border: 1px solid #ccc; padding: 10px; background-color: #fcfcfc; }
+
+        body.preview-mode #reportSection, body.preview-mode #inputSection { width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important; }
+        
+        /* ★★★ 關鍵：預覽模式強制展開表格 ★★★ */
+        body.preview-mode .analysis-table-container,
+        body.preview-mode .history-scroll-container { max-height: none !important; overflow: visible !important; border: none !important; }
+
+        body.preview-mode .tab-content > .tab-pane {
+            display: block !important; opacity: 1 !important; visibility: visible !important;
+            margin-bottom: 20px; border-bottom: 1px dashed #ccc;
+        }
+        
+        body.preview-mode .chart-container { height: 200px !important; }
+        body.preview-mode .print-only-header, body.preview-mode .print-only-footer { display: block !important; }
+        body.preview-mode.hide-charts-on-print .chart-card { display: none !important; }
+        body.preview-mode .balance-card { background: white !important; color: black !important; border: 2px solid #0d6efd !important; }
+        
+        body.preview-mode #kpiCard { background: white; color: black; border: 1px solid #ddd; }
+        body.preview-mode #kpiCard .card-header { background: #f8f9fa !important; color: black !important; }
+
+        #previewControls { position: fixed; top: 10px; right: 10px; z-index: 9999; display: none; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; }
+        body.preview-mode #previewControls { display: block; }
+    </style>
+</head>
+<body>
+
+<div id="previewControls">
+    <button class="btn btn-danger btn-sm me-2" onclick="exitPreviewMode()"><i class="fas fa-times"></i> 關閉預覽</button>
+    <button class="btn btn-primary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> 立即列印</button>
+</div>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 no-print">
+    <div class="container">
+        <a class="navbar-brand" href="#"><i class="fas fa-wallet"></i> 財務管家 (v22)   傑昇冷凍空調技師事務所</a>
+        <div class="d-flex gap-2">
+            <button class="btn btn-info btn-sm text-dark fw-bold" onclick="openPrintSettings()" title="設定並列印"><i class="fas fa-print"></i> 列印 / 預覽</button>
+            <div class="vr bg-light"></div>
+            <button class="btn btn-warning btn-sm" onclick="exportData()"><i class="fas fa-file-export"></i> 匯出</button>
+            <button class="btn btn-outline-light btn-sm" onclick="triggerImport()"><i class="fas fa-file-import"></i> 匯入</button>
+            <input type="file" id="importFileInput" accept=".json" onchange="importData(this)">
+        </div>
+    </div>
+</nav>
+
+<div class="container">
+    <div class="print-only-header">
+        <h2 id="printTitleDisplay">傑昇冷凍空調技師事務所--財務收支報表</h2>
+        <p class="mb-0 text-muted" id="printSubtitleDisplay">統計區間：全部</p>
+    </div>
+
+    <!-- 1. 儀表板 -->
+    <div class="row mb-4">
+        <div class="col-md-4"><div class="card balance-card p-3"><h5>目前淨資產</h5><h2 id="displayBalance" class="mb-0">$0</h2><small id="displayBalancePct" class="dashboard-pct">佔總收入 0%</small></div></div>
+        <div class="col-md-4"><div class="card p-3"><h5 class="text-success">總收入</h5><h3 id="displayIncome" class="income-text mb-0">$0</h3><small class="dashboard-pct text-muted">&nbsp;</small></div></div>
+        <div class="col-md-4"><div class="card p-3"><h5 class="text-danger">總支出</h5><h3 id="displayExpense" class="expense-text mb-0">$0</h3><small id="displayExpensePct" class="dashboard-pct text-danger">佔總收入 0%</small></div></div>
+    </div>
+
+    <div class="row">
+        <!-- 2. 輸入區與目標設定 -->
+        <div class="col-md-4" id="inputSection">
+            <div class="card no-print" id="formCard">
+                <div class="card-header bg-primary text-white"><span id="formTitle">新增收支紀錄</span></div>
+                <div class="card-body">
+                    <form id="transactionForm">
+                        <input type="hidden" id="editId">
+                        <div class="mb-3"><label class="form-label">日期</label><input type="date" class="form-control" id="date" required></div>
+                        <div class="mb-3"><label class="form-label">收支型態</label><select class="form-select" id="type" onchange="updateCategoryOptions()"><option value="expense">支出</option><option value="income">收入</option></select></div>
+                        <div class="mb-3"><label class="form-label">類別</label><div class="input-group"><select class="form-select" id="category" required></select><button class="btn btn-outline-secondary" type="button" onclick="openAddCategoryModal()">+</button><button class="btn btn-outline-danger" type="button" onclick="confirmDeleteCategory()">-</button></div></div>
+                        <div class="mb-3"><label class="form-label">摘要</label><input type="text" class="form-control" id="description" placeholder="例如：午餐" required></div>
+                        <div class="mb-3"><label class="form-label">金額</label><input type="text" inputmode="numeric" class="form-control" id="amount" placeholder="0" required onkeyup="formatInputElement(this)"></div>
+                        <button type="submit" class="btn btn-primary w-100" id="submitBtn">加入資料</button>
+                        <button type="button" class="btn btn-secondary w-100 mt-2 d-none" id="cancelEditBtn">取消修改</button>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="card mt-3" id="kpiCard">
+                <div class="card-header bg-info text-white">年度目標設定</div>
+                <div class="card-body">
+                    <div class="input-group mb-2"><span class="input-group-text">預計營業額</span><input type="text" inputmode="numeric" class="form-control" id="goalAmount" value="8,000,000" onkeyup="formatInputElement(this); calculateKPI(); searchHistory();"></div>
+                    <div class="mt-3 alert alert-light text-center fs-5" id="predictionResult"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 報表與列表區 -->
+        <div class="col-md-8" id="reportSection">
+            <div class="card mb-4 chart-card">
+                <div class="card-header no-print">
+                    <ul class="nav nav-tabs card-header-tabs" id="chartTabs" role="tablist">
+                        <li class="nav-item"><button class="nav-link active text-danger" id="expense-tab" data-bs-toggle="tab" data-bs-target="#expense-chart-pane" type="button">支出分析</button></li>
+                        <li class="nav-item"><button class="nav-link text-success" id="income-tab" data-bs-toggle="tab" data-bs-target="#income-chart-pane" type="button">收入分析</button></li>
+                    </ul>
+                </div>
+                <div class="card-header d-none d-print-block fw-bold text-center border-bottom-0 pb-0" style="font-size:1.1rem;">收支分類分析圖表</div>
+                <div class="card-body">
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="expense-chart-pane">
+                            <h6 class="d-none d-print-block text-danger border-bottom pb-1 mb-3"><i class="fas fa-chart-pie"></i> 支出分析</h6>
+                            <div class="row">
+                                <div class="col-5 analysis-table-container"><table class="table table-sm table-striped mb-0"><thead class="table-light"><tr><th>類別</th><th class="text-end">金額</th><th class="text-end">佔比</th></tr></thead><tbody id="expenseAnalysisTable"></tbody></table></div>
+                                <div class="col-7"><div class="chart-container"><canvas id="expenseChart"></canvas></div></div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="income-chart-pane">
+                            <div class="d-none d-print-block mt-4 mb-2 border-top pt-3"></div> 
+                            <h6 class="d-none d-print-block text-success border-bottom pb-1 mb-3"><i class="fas fa-chart-pie"></i> 收入分析</h6>
+                            <div class="row">
+                                <div class="col-5 analysis-table-container"><table class="table table-sm table-striped mb-0"><thead class="table-light"><tr><th>類別</th><th class="text-end">金額</th><th class="text-end">佔比</th></tr></thead><tbody id="incomeAnalysisTable"></tbody></table></div>
+                                <div class="col-7"><div class="chart-container"><canvas id="incomeChart"></canvas></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>交易明細表</span>
+                    <button class="btn btn-danger btn-sm no-print" onclick="confirmClearAll()">❌ 清空</button>
+                </div>
+                <div class="card-body">
+                    <div class="bg-light p-3 rounded mb-3 border no-print">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3"><label class="small text-muted mb-1">開始日期</label><input type="date" id="searchStart" class="form-control form-control-sm"></div>
+                            <div class="col-md-3"><label class="small text-muted mb-1">結束日期</label><input type="date" id="searchEnd" class="form-control form-control-sm"></div>
+                            <div class="col-md-3"><label class="small text-muted mb-1">類別</label><div class="dropdown"><button class="btn btn-outline-secondary btn-sm w-100 dropdown-toggle" type="button" id="categoryDropdownBtn" data-bs-toggle="dropdown">(全部)</button><div class="dropdown-menu checkbox-dropdown-menu p-2" id="searchCategoryMenu"></div></div></div>
+                            <div class="col-md-3"><label class="small text-muted mb-1">關鍵字</label><input type="text" id="searchKeyword" class="form-control form-control-sm" placeholder="搜尋..."></div>
+                            <div class="col-md-12 mt-2 d-flex justify-content-between">
+                                <div><button class="btn btn-sm btn-primary px-3" onclick="searchHistory()">🔍 查詢</button><button class="btn btn-sm btn-secondary" onclick="resetSearch()">重置</button></div>
+                                <button class="btn btn-sm btn-outline-dark" onclick="toggleDateSort()" id="sortBtn">▼ 日期</button>
+                            </div>
+                        </div>
+                        <div id="searchSummaryPanel" class="search-stats-bar" style="display:none;">
+                            <div class="row text-center">
+                                <div class="col-3 border-end"><span class="d-block text-muted small">收入</span><span id="filteredIncome" class="text-success fw-bold"></span></div>
+                                <div class="col-3 border-end"><span class="d-block text-muted small">支出</span><span id="filteredExpense" class="text-danger fw-bold"></span></div>
+                                <div class="col-3 border-end"><span class="d-block text-muted small">結餘</span><span id="filteredBalance" class="fw-bold"></span></div>
+                                <div class="col-3"><span class="d-block text-muted small">KPI</span><span id="filteredKPI" class="badge bg-info text-dark"></span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="print-search-summary" id="printSearchSummaryBlock"></div>
+
+                    <!-- 表格容器 -->
+                    <div class="table-responsive history-scroll-container">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>日期</th><th>類別</th><th>摘要</th><th>收支</th><th class="text-end">金額</th><th class="no-print">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyList"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="print-only-footer">
+        <div class="row w-100">
+            <div class="col-4 text-start"><span id="printFooterLeft"></span></div>
+            <div class="col-4 text-center"><span id="printFooterCenter">第 1 頁</span></div>
+            <div class="col-4 text-end">列印日期: <span id="printTimestamp"></span></div>
+        </div>
+    </div>
+</div>
+
+<!-- 列印設定 Modal -->
+<div class="modal fade" id="printSettingsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white"><h5 class="modal-title"><i class="fas fa-print"></i> 列印設定</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-md-6 border-end">
+                        <h6 class="text-primary border-bottom pb-2">1. 內容設定</h6>
+                        <div class="mb-2"><label class="form-label small">報表標題</label><input type="text" class="form-control form-control-sm" id="pTitle" value="傑昇冷凍空調技師事務所--財務收支報表"></div>
+                        <div class="mb-2"><label class="form-label small">副標題</label><input type="text" class="form-control form-control-sm" id="pSubtitle"></div>
+                        <div class="mb-2"><label class="form-label small">頁尾左側</label><input type="text" class="form-control form-control-sm" id="pFooterLeft" value="財務管家系統"></div>
+                        <div class="form-check form-switch mt-3"><input class="form-check-input" type="checkbox" id="pShowCharts" checked><label class="form-check-label" for="pShowCharts">包含圖表</label></div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-success border-bottom pb-2">2. 版面與縮放</h6>
+                        <div class="mb-3"><label class="form-label small d-flex justify-content-between"><span>縮放比例</span><span class="badge bg-secondary" id="scaleValue">100%</span></label><input type="range" class="form-range" id="pScale" min="0.5" max="1.5" step="0.05" value="1" oninput="document.getElementById('scaleValue').innerText = Math.round(this.value*100) + '%'"></div>
+                        <div class="row g-2"><label class="form-label small mb-0">邊界 (mm)</label>
+                            <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">上</span><input type="number" class="form-control" id="pMarginTop" value="15"></div></div>
+                            <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">下</span><input type="number" class="form-control" id="pMarginBottom" value="15"></div></div>
+                            <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">左</span><input type="number" class="form-control" id="pMarginLeft" value="10"></div></div>
+                            <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">右</span><input type="number" class="form-control" id="pMarginRight" value="10"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light"><button type="button" class="btn btn-outline-secondary" onclick="enablePreviewMode()"><i class="fas fa-eye"></i> 預覽</button><button type="button" class="btn btn-primary px-4" onclick="applyAndPrint()"><i class="fas fa-print"></i> 列印</button></div>
+        </div>
+    </div>
+</div>
+
+<!-- 其他 Modals -->
+<div class="modal fade" id="addCategoryModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">新增類別</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label>類型</label><input type="text" class="form-control" id="modalTypeDisplay" readonly disabled></div><div class="mb-3"><label>名稱</label><input type="text" class="form-control" id="newCategoryName"></div></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-primary" onclick="saveNewCategory()">確認</button></div></div></div></div>
+<div class="modal fade" id="deleteCategoryModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header bg-danger text-white"><h5 class="modal-title">刪除類別</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><p>確定刪除「<strong id="delCatName"></strong>」？</p></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-danger" onclick="executeDeleteCategory()">刪除</button></div></div></div></div>
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-body text-center py-4"><h5>確認刪除?</h5></div><div class="modal-footer justify-content-center"><button class="btn btn-secondary" data-bs-dismiss="modal">否</button><button class="btn btn-danger" onclick="executeDelete()">是</button></div></div></div></div>
+<div class="modal fade" id="deleteAllModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header bg-dark text-white"><h5 class="modal-title">清空資料</h5></div><div class="modal-body text-center"><h4 class="text-danger">確定清空所有資料？</h4></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-danger" onclick="executeClearAll()">確認清空</button></div></div></div></div>
+
+<script>
+    const defaultCategories = { expense: ['飲食', '交通', '居住', '娛樂', '醫療', '教育', '購物', '其他支出'], income: ['薪資', '獎金', '投資', '兼職', '其他收入'] };
+    let categories = JSON.parse(localStorage.getItem('userCategories')) || JSON.parse(JSON.stringify(defaultCategories));
+    let transactions = JSON.parse(localStorage.getItem('transactions')) || [];
+    transactions = transactions.map(t => ({ ...t, category: t.category || (t.type === 'income' ? '其他收入' : '其他支出') }));
+    let isSortDesc = true, editMode = false, pendingDeleteId = null, pendingDeleteCategoryName = null;
+    let expenseChartInstance = null, incomeChartInstance = null, printModal;
+
+    function formatMoney(amount) { return '$' + Number(amount).toLocaleString(); }
+    function parseRawMoney(value) { return value ? Number(String(value).replace(/,/g, '')) : 0; }
+    function formatInputElement(input) { let raw = input.value.replace(/,/g, '').replace(/\D/g, ''); input.value = raw ? Number(raw).toLocaleString() : ''; }
+
+    function updateCategoryOptions(selCat = null) {
+        const type = document.getElementById('type').value;
+        const sel = document.getElementById('category'); sel.innerHTML = '';
+        if(!categories[type]) categories[type] = [];
+        categories[type].forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.text = c; if(selCat && c === selCat) opt.selected = true; sel.appendChild(opt); });
+        updateSearchCategoryCheckboxes();
+    }
+    function updateSearchCategoryCheckboxes() {
+        const menu = document.getElementById('searchCategoryMenu'); menu.innerHTML = '';
+        const addHeader = txt => { const h = document.createElement('div'); h.className = 'dropdown-header fw-bold text-dark border-bottom mb-1'; h.innerText = txt; menu.appendChild(h); };
+        const addItem = val => { const div = document.createElement('div'); div.className = 'dropdown-item-text form-check'; div.onclick = e => e.stopPropagation(); div.innerHTML = `<input class="form-check-input search-cat-cb" type="checkbox" value="${val}" id="chk_${val}" onchange="updateDropdownText()"><label class="form-check-label w-100" for="chk_${val}" style="cursor:pointer">${val}</label>`; menu.appendChild(div); };
+        if(categories.expense?.length) { addHeader('支出'); categories.expense.forEach(addItem); }
+        menu.appendChild(document.createElement('hr'));
+        if(categories.income?.length) { addHeader('收入'); categories.income.forEach(addItem); }
+    }
+    function updateDropdownText() {
+        const len = document.querySelectorAll('.search-cat-cb:checked').length;
+        const btn = document.getElementById('categoryDropdownBtn');
+        btn.innerText = len === 0 ? '(全部)' : `已選 ${len} 項`;
+        btn.classList.toggle('btn-secondary', len > 0); btn.classList.toggle('btn-outline-secondary', len === 0);
+    }
+
+    function openPrintSettings() {
+        const s = document.getElementById('searchStart').value; const e = document.getElementById('searchEnd').value;
+        document.getElementById('pSubtitle').value = (s || e) ? `區間：${s||'起'} ~ ${e||'至今'}` : "統計區間：所有紀錄";
+        printModal = new bootstrap.Modal(document.getElementById('printSettingsModal')); printModal.show();
+    }
+    function applyPrintSettingsToDOM() {
+        const root = document.documentElement;
+        root.style.setProperty('--p-margin-top', document.getElementById('pMarginTop').value + 'mm');
+        root.style.setProperty('--p-margin-bottom', document.getElementById('pMarginBottom').value + 'mm');
+        root.style.setProperty('--p-margin-left', document.getElementById('pMarginLeft').value + 'mm');
+        root.style.setProperty('--p-margin-right', document.getElementById('pMarginRight').value + 'mm');
+        root.style.setProperty('--p-font-scale', document.getElementById('pScale').value);
+        document.getElementById('printTitleDisplay').innerText = document.getElementById('pTitle').value;
+        document.getElementById('printSubtitleDisplay').innerText = document.getElementById('pSubtitle').value;
+        document.getElementById('printFooterLeft').innerText = document.getElementById('pFooterLeft').value;
+        document.getElementById('printTimestamp').innerText = new Date().toLocaleString();
+        if (document.getElementById('pShowCharts').checked) document.body.classList.remove('hide-charts-on-print'); else document.body.classList.add('hide-charts-on-print');
+    }
+    function enablePreviewMode() { applyPrintSettingsToDOM(); printModal.hide(); document.body.classList.add('preview-mode'); window.scrollTo(0, 0); }
+    function exitPreviewMode() { document.body.classList.remove('preview-mode', 'hide-charts-on-print'); }
+    function applyAndPrint() { applyPrintSettingsToDOM(); printModal.hide(); setTimeout(() => { const originalTitle = document.title; document.title = `財務報表_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`; window.print(); document.title = originalTitle; }, 300); }
+
+    function init() {
+        let totalInc = 0, totalExp = 0;
+        transactions.forEach(t => t.type === 'income' ? totalInc += Number(t.amount) : totalExp += Number(t.amount));
+        document.getElementById('displayBalance').innerText = formatMoney(totalInc - totalExp);
+        document.getElementById('displayIncome').innerText = formatMoney(totalInc);
+        document.getElementById('displayExpense').innerText = formatMoney(totalExp);
+        const balPct = totalInc ? ((totalInc - totalExp)/totalInc*100).toFixed(1) : 0;
+        const expPct = totalInc ? (totalExp/totalInc*100).toFixed(1) : 0;
+        document.getElementById('displayBalancePct').innerText = `佔收入 ${balPct}%`;
+        document.getElementById('displayExpensePct').innerText = `佔收入 ${expPct}%`;
+        updateCharts(); 
+        renderTable(transactions); 
+        calculateKPI();
+    }
+
+    function renderTable(list, isFiltered=false) {
+        list.sort((a,b) => isSortDesc ? (new Date(b.date)-new Date(a.date) || b.id-a.id) : (new Date(a.date)-new Date(b.date) || a.id-b.id));
+        const tbody = document.getElementById('historyList');
+        tbody.innerHTML = list.length ? '' : '<tr><td colspan="6" class="text-center text-muted">無資料</td></tr>';
+        let fInc=0, fExp=0;
+        list.forEach(t => {
+            t.type==='income' ? fInc+=Number(t.amount) : fExp+=Number(t.amount);
+            const row = document.createElement('tr');
+            const color = t.type==='income'?'success':'danger';
+            row.innerHTML = `<td>${t.date}</td><td><span class="badge bg-secondary">${t.category}</span></td><td>${t.description}</td><td><span class="badge bg-${color}">${t.type==='income'?'收入':'支出'}</span></td><td class="text-end text-${color}">${formatMoney(t.amount)}</td><td class="no-print"><button class="btn btn-sm btn-warning py-0" onclick="editT(${t.id})"><i class="fas fa-edit"></i></button> <button class="btn btn-sm btn-outline-danger py-0" onclick="confirmDelete(${t.id})"><i class="fas fa-trash"></i></button></td>`;
+            tbody.appendChild(row);
+        });
+        
+        const panel = document.getElementById('searchSummaryPanel');
+        const goal = parseRawMoney(document.getElementById('goalAmount').value)||1;
+        const kpiVal = ((fInc/goal)*100).toFixed(2)+'%';
+        
+        if(isFiltered || list.length !== transactions.length) {
+            panel.style.display = 'block';
+            document.getElementById('filteredIncome').innerText = formatMoney(fInc);
+            document.getElementById('filteredExpense').innerText = formatMoney(fExp);
+            document.getElementById('filteredBalance').innerText = formatMoney(fInc-fExp);
+            document.getElementById('filteredKPI').innerText = kpiVal;
+        } else { panel.style.display = 'none'; }
+
+        updatePrintSearchSummary(fInc, fExp, kpiVal);
+    }
+
+    function updatePrintSearchSummary(fInc, fExp, kpiVal) {
+        const s = document.getElementById('searchStart').value;
+        const e = document.getElementById('searchEnd').value;
+        const kw = document.getElementById('searchKeyword').value.trim();
+        const cats = Array.from(document.querySelectorAll('.search-cat-cb:checked')).map(c=>c.value);
+        
+        let filterText = [];
+        filterText.push(`<strong>日期範圍:</strong> ${s||'不限'} ~ ${e||'不限'}`);
+        filterText.push(`<strong>類別:</strong> ${cats.length > 0 ? cats.join(', ') : '全部'}`);
+        if(kw) filterText.push(`<strong>關鍵字:</strong> ${kw}`);
+        
+        const html = `
+            <div class="row">
+                <div class="col-12 border-bottom pb-2 mb-2">
+                    ${filterText.join(' &nbsp;|&nbsp; ')}
+                </div>
+                <div class="col-12 d-flex justify-content-around">
+                    <span>總收入: <strong class="text-success">${formatMoney(fInc)}</strong></span>
+                    <span>總支出: <strong class="text-danger">${formatMoney(fExp)}</strong></span>
+                    <span>結餘: <strong>${formatMoney(fInc-fExp)}</strong></span>
+                    <span>KPI達成率: <strong>${kpiVal}</strong></span>
+                </div>
+            </div>
+        `;
+        document.getElementById('printSearchSummaryBlock').innerHTML = html;
+    }
+
+    function searchHistory() {
+        const s = document.getElementById('searchStart').value ? new Date(document.getElementById('searchStart').value) : null;
+        const e = document.getElementById('searchEnd').value ? new Date(document.getElementById('searchEnd').value) : null;
+        const kw = document.getElementById('searchKeyword').value.trim().toLowerCase();
+        const cats = Array.from(document.querySelectorAll('.search-cat-cb:checked')).map(c=>c.value);
+        const res = transactions.filter(t => {
+            const d = new Date(t.date);
+            if(s && d < s) return false; if(e && d > e) return false;
+            if(cats.length && !cats.includes(t.category)) return false;
+            if(kw && !t.description.toLowerCase().includes(kw)) return false;
+            return true;
+        });
+        renderTable(res, true);
+    }
+    function resetSearch() { document.getElementById('searchStart').value=''; document.getElementById('searchEnd').value=''; document.getElementById('searchKeyword').value=''; document.querySelectorAll('.search-cat-cb').forEach(c=>c.checked=false); updateDropdownText(); renderTable(transactions, false); }
+    function toggleDateSort() { isSortDesc = !isSortDesc; searchHistory(); }
+
+    function updateCharts() {
+        const exp={}, inc={}; transactions.forEach(t => { const v = Number(t.amount); t.type==='expense' ? exp[t.category]=(exp[t.category]||0)+v : inc[t.category]=(inc[t.category]||0)+v; });
+        drawChart('expenseChart', 'expenseAnalysisTable', expenseChartInstance, exp); drawChart('incomeChart', 'incomeAnalysisTable', incomeChartInstance, inc);
+    }
+    function drawChart(cvsId, tblId, inst, data) {
+        const ctx = document.getElementById(cvsId).getContext('2d');
+        const keys = Object.keys(data), vals = Object.values(data), total = vals.reduce((a,b)=>a+b,0);
+        const tbl = document.getElementById(tblId); tbl.innerHTML = '';
+        if(!keys.length) tbl.innerHTML = '<tr><td colspan="3" class="text-center text-muted">無資料</td></tr>';
+        keys.map((k,i)=>({k, v:vals[i]})).sort((a,b)=>b.v-a.v).forEach(o => { tbl.innerHTML += `<tr><td>${o.k}</td><td class="text-end">${formatMoney(o.v)}</td><td class="text-end small">${total?((o.v/total)*100).toFixed(1)+'%':'0%'}</td></tr>`; });
+        if(cvsId==='expenseChart' && expenseChartInstance) expenseChartInstance.destroy(); if(cvsId==='incomeChart' && incomeChartInstance) incomeChartInstance.destroy();
+        const chart = new Chart(ctx, { type: 'pie', data: { labels: keys.length?keys:['無資料'], datasets: [{ data: keys.length?vals:[1], backgroundColor: keys.length?['#dc3545','#fd7e14','#ffc107','#20c997','#0dcaf0','#6610f2','#d63384','#6c757d']:['#e9ecef'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: {position:'right', display: !!keys.length} } } });
+        if(cvsId==='expenseChart') expenseChartInstance = chart; else incomeChartInstance = chart;
+    }
+
+    document.getElementById('transactionForm').onsubmit = function(e) {
+        e.preventDefault();
+        const d=document.getElementById('date').value, ty=document.getElementById('type').value, c=document.getElementById('category').value, de=document.getElementById('description').value, a=parseRawMoney(document.getElementById('amount').value);
+        if(a<=0) return alert('金額錯誤');
+        if(editMode) {
+            const idx = transactions.findIndex(t => t.id == document.getElementById('editId').value);
+            transactions[idx] = { id: Number(document.getElementById('editId').value), date:d, type:ty, category:c, description:de, amount:a };
+            editMode = false;
+        } else { transactions.push({ id: Date.now(), date:d, type:ty, category:c, description:de, amount:a }); }
+        updateLS(); init(); resetForm();
+    };
+    function resetForm() { document.getElementById('transactionForm').reset(); document.getElementById('date').valueAsDate=new Date(); document.getElementById('submitBtn').innerText='加入資料'; document.getElementById('cancelEditBtn').classList.add('d-none'); updateCategoryOptions(); }
+    function editT(id) {
+        const t = transactions.find(x=>x.id===id); if(!t) return;
+        document.getElementById('date').value=t.date; document.getElementById('type').value=t.type; updateCategoryOptions(t.category);
+        document.getElementById('description').value=t.description; document.getElementById('amount').value=t.amount.toLocaleString(); document.getElementById('editId').value=t.id; editMode=true;
+        document.getElementById('submitBtn').innerText='更新'; document.getElementById('cancelEditBtn').classList.remove('d-none'); window.scrollTo(0,0);
+    }
+    function confirmDelete(id) { pendingDeleteId=id; new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show(); }
+    function executeDelete() { transactions = transactions.filter(t=>t.id!==pendingDeleteId); updateLS(); init(); bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal')).hide(); }
+    function confirmClearAll() { if(transactions.length) new bootstrap.Modal(document.getElementById('deleteAllModal')).show(); }
+    function executeClearAll() { transactions=[]; updateLS(); init(); bootstrap.Modal.getInstance(document.getElementById('deleteAllModal')).hide(); }
+    function openAddCategoryModal() { document.getElementById('modalTypeDisplay').value=document.getElementById('type').value==='expense'?'支出':'收入'; new bootstrap.Modal(document.getElementById('addCategoryModal')).show(); }
+    function saveNewCategory() { const ty=document.getElementById('type').value, nm=document.getElementById('newCategoryName').value.trim(); if(nm && !categories[ty].includes(nm)) { categories[ty].push(nm); localStorage.setItem('userCategories', JSON.stringify(categories)); updateCategoryOptions(nm); bootstrap.Modal.getInstance(document.getElementById('addCategoryModal')).hide(); } }
+    function confirmDeleteCategory() { const c=document.getElementById('category').value; if(c && !['其他支出','其他收入'].includes(c)) { pendingDeleteCategoryName=c; document.getElementById('delCatName').innerText=c; new bootstrap.Modal(document.getElementById('deleteCategoryModal')).show(); } else alert('無法刪除'); }
+    function executeDeleteCategory() { const ty=document.getElementById('type').value, fb=ty==='expense'?'其他支出':'其他收入'; categories[ty]=categories[ty].filter(x=>x!==pendingDeleteCategoryName); transactions.forEach(t=>{ if(t.type===ty && t.category===pendingDeleteCategoryName) t.category=fb; }); localStorage.setItem('userCategories', JSON.stringify(categories)); updateLS(); init(); updateCategoryOptions(); bootstrap.Modal.getInstance(document.getElementById('deleteCategoryModal')).hide(); }
+    function updateLS() { localStorage.setItem('transactions', JSON.stringify(transactions)); }
+    function calculateKPI() { const g = parseRawMoney(document.getElementById('goalAmount').value)||1; const inc = transactions.filter(t=>t.type==='income').reduce((a,b)=>a+Number(b.amount),0); const kpi = (inc/g)*100; document.getElementById('predictionResult').innerHTML = `KPI: <strong>${kpi.toFixed(2)}%</strong>`; document.getElementById('predictionResult').className = `mt-3 alert alert-${kpi>=100?'success':(kpi>=50?'primary':'warning')} text-center fs-5`; }
+    function exportData() { const blob = new Blob([JSON.stringify({transactions, categories, date:new Date()})], {type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`Backup_${new Date().toISOString().slice(0,10)}.json`; a.click(); }
+    function triggerImport() { document.getElementById('importFileInput').click(); }
+    function importData(el) { const r=new FileReader(); r.onload=e=>{ try { const d=JSON.parse(e.target.result); if(d.transactions) { transactions=d.transactions; if(d.categories) categories=d.categories; updateLS(); localStorage.setItem('userCategories',JSON.stringify(categories)); init(); updateCategoryOptions(); alert('成功'); } } catch(x){alert('失敗');} }; r.readAsText(el.files[0]); el.value=''; }
+
+    window.onload = function() { document.getElementById('date').valueAsDate=new Date(); updateCategoryOptions(); init(); };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
