@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>委託案管理與財務統計系統 v32-R32 (動態高度版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <style>
+        html, body { height: 100%; overflow: hidden; }
+        input, select, textarea { @apply mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500 text-sm; box-sizing: border-box; }
+        .payment-group { @apply bg-white p-3 rounded-lg border border-gray-200 shadow-sm mb-4; }
+        .payment-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 12px; }
+        .payment-item { display: flex; flex-direction: column; }
+        .payment-item label { @apply text-[11px] font-bold text-gray-500 mb-0.5; }
+        .payment-item input { @apply mt-0 p-1.5 text-xs; }
+        .btn { @apply px-4 py-2 rounded text-white font-bold transition duration-200 text-sm cursor-pointer; }
+        .sidebar { height: 100vh; overflow-y: auto; padding-bottom: 50px; }
+        .report-area { height: 100vh; overflow-y: auto; padding-bottom: 50px; }
+        .chart-container { position: relative; height: 250px; width: 100%; }
+        
+        /* 表格容器：加入 transition 讓高度變化有平滑動畫 */
+        .table-wrapper { 
+            max-height: 310px; 
+            overflow-y: auto; 
+            position: relative; 
+            transition: max-height 0.3s ease; 
+        }
+        
+        table { border-collapse: separate; border-spacing: 0; width: 100%; }
+        
+        /* 固定標題列 */
+        thead th { 
+            position: sticky; 
+            top: 0; 
+            z-index: 10; 
+            background-color: #f9fafb !important; 
+            box-shadow: 0 1px 0 rgba(0,0,0,0.1); 
+            height: 42px; 
+            box-sizing: border-box; 
+        }
+        
+        /* 固定黃底總計列 */
+        .sticky-total td { 
+            position: sticky; 
+            top: 41px; 
+            z-index: 9; 
+            background-color: #fefce8 !important; 
+            box-shadow: inset 0 -2px 0 #d1d5db; 
+        }
+
+        #pdf-header { display: none; }
+        @media print { .no-print { display: none !important; } }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+
+<div class="flex flex-col lg:flex-row h-full">
+    <!-- 左側：資料輸入區 -->
+    <div class="lg:w-1/3 w-full bg-white p-6 shadow-2xl sidebar border-r border-gray-300 no-print">
+        <h2 class="text-xl font-bold mb-4 text-blue-800 border-b-2 border-blue-100 pb-2">案件資料輸入 v32-R32</h2>
+        <form id="dataForm" onsubmit="event.preventDefault();">
+            <input type="hidden" id="editIndex" value="-1">
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="col-span-2"><label class="text-sm font-medium">案名：</label><input type="text" id="caseName" required></div>
+                <div><label class="text-sm font-medium">業主：</label><input type="text" id="client" required></div>
+                <div><label class="text-sm font-medium">委託事項：</label><input type="text" id="taskType"></div>
+                <div><label class="text-sm font-medium">委託日期：</label><input type="date" id="contractDate"></div>
+                <div><label class="text-sm font-medium text-blue-700 font-bold">委託金額：</label><input type="number" id="totalAmount" value="0" oninput="calcTotals()"></div>
+                <div><label class="text-sm font-medium">介紹人：</label><input type="text" id="referral"></div>
+                <div><label class="text-sm font-medium text-orange-600">顧問公司：</label><input type="text" id="consultant"></div>
+                <div><label class="text-sm font-medium">申請等級：</label><input type="text" id="applyLevel"></div>
+                <div>
+                    <label class="text-sm font-medium text-purple-700 font-bold">專案執行人：</label>
+                    <select id="executor">
+                        <option value="張滌淞">張滌淞</option>
+                        <option value="張卉岑">張卉岑</option>
+                        <option value="傅湘瑜">傅湘瑜</option>
+                        <option value="劉中民">劉中民</option>
+                        <option value="其他">其他</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 備註欄位 -->
+            <div class="mb-4">
+                <label class="text-sm font-medium">備註：</label>
+                <textarea id="remarks" rows="2" placeholder="請輸入備註事項..."></textarea>
+            </div>
+
+            <h3 class="text-sm font-bold text-gray-700 mb-2 mt-4 italic underline">款項明細與稅務扣除</h3>
+            
+            <div class="payment-group bg-blue-50">
+                <span class="text-xs font-bold text-blue-800">● 簽約金</span>
+                <div class="payment-grid mt-2">
+                    <div class="payment-item"><label>請款金額</label><input type="number" id="p1_req_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label>請款日期</label><input type="date" id="p1_req_date"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳金額</label><input type="number" id="p1_in_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳日期</label><input type="date" id="p1_in_date"></div>
+                    <div class="payment-item col-span-2"><label class="text-red-500">扣除手續費或稅款</label><input type="number" id="p1_tax" value="0" oninput="calcTotals()"></div>
+                </div>
+            </div>
+
+            <div class="payment-group bg-green-50">
+                <span class="text-xs font-bold text-green-800">● 第1期款</span>
+                <div class="payment-grid mt-2">
+                    <div class="payment-item"><label>請款金額</label><input type="number" id="p2_req_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label>請款日期</label><input type="date" id="p2_req_date"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳金額</label><input type="number" id="p2_in_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳日期</label><input type="date" id="p2_in_date"></div>
+                    <div class="payment-item col-span-2"><label class="text-red-500">扣除手續費或稅款</label><input type="number" id="p2_tax" value="0" oninput="calcTotals()"></div>
+                </div>
+            </div>
+
+            <div class="payment-group bg-yellow-50">
+                <span class="text-xs font-bold text-yellow-800">● 第2期款</span>
+                <div class="payment-grid mt-2">
+                    <div class="payment-item"><label>請款金額</label><input type="number" id="p3_req_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label>請款日期</label><input type="date" id="p3_req_date"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳金額</label><input type="number" id="p3_in_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳日期</label><input type="date" id="p3_in_date"></div>
+                    <div class="payment-item col-span-2"><label class="text-red-500">扣除手續費或稅款</label><input type="number" id="p3_tax" value="0" oninput="calcTotals()"></div>
+                </div>
+            </div>
+
+            <div class="payment-group bg-red-50">
+                <span class="text-xs font-bold text-red-800">● 尾款</span>
+                <div class="payment-grid mt-2">
+                    <div class="payment-item"><label>請款金額</label><input type="number" id="p4_req_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label>請款日期</label><input type="date" id="p4_req_date"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳金額</label><input type="number" id="p4_in_amt" value="0" oninput="calcTotals()"></div>
+                    <div class="payment-item"><label class="text-blue-600">入帳日期</label><input type="date" id="p4_in_date"></div>
+                    <div class="payment-item col-span-2"><label class="text-red-500">扣除手續費或稅款</label><input type="number" id="p4_tax" value="0" oninput="calcTotals()"></div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800 p-4 rounded-lg text-white mb-6 shadow-inner space-y-1">
+                <div class="flex justify-between text-sm text-blue-100 font-bold border-b border-slate-700 pb-1 mb-1">
+                    <span>委託金額：</span><span id="grand_total_display">0</span>
+                </div>
+                <div class="flex justify-between text-sm"><span>合計已請款金額：</span><span id="total_req_display">0</span></div>
+                <div class="flex justify-between text-sm text-red-300"><span>合計扣除稅費：</span><span id="total_tax_display">0</span></div>
+                <div class="flex justify-between text-sm text-blue-300"><span>合計已入帳金額：</span><span id="total_in_display">0</span></div>
+                <hr class="border-slate-600 my-2">
+                <div class="flex justify-between text-sm font-bold text-red-400"><span>合計未入帳金額：</span><span id="total_unpaid_display">0</span></div>
+                <div class="flex justify-between text-sm font-bold text-yellow-400"><span>合計未請款金額：</span><span id="total_remain_display">0</span></div>
+            </div>
+
+            <div class="flex gap-2 mb-10">
+                <button type="button" onclick="saveData()" class="btn bg-blue-600 hover:bg-blue-700 flex-1">儲存案件</button>
+                <button type="button" onclick="resetForm()" class="btn bg-gray-400 hover:bg-gray-500">重置</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 右側：報表區 -->
+    <div class="lg:w-2/3 w-full p-6 report-area">
+        <div class="flex flex-wrap justify-between items-center mb-6 gap-2 bg-white p-4 rounded-lg shadow-sm border border-gray-200 no-print">
+            <h2 class="text-2xl font-bold text-gray-800">財務分析報表 v32-R32</h2>
+            <div class="flex flex-wrap gap-2 items-center">
+                <button onclick="exportXLSX()" class="btn bg-green-600">Excel 匯出</button>
+                <button onclick="document.getElementById('importFile').click()" class="btn bg-amber-600">Excel 匯入</button>
+                <input type="file" id="importFile" class="hidden" accept=".xlsx, .csv" onchange="importData(event)">
+                <button onclick="exportPDF()" id="pdfBtn" class="btn bg-red-600">PDF</button>
+                <button onclick="deleteCompletedProjects()" class="btn bg-purple-600 hover:bg-purple-700" title="刪除所有未請款且未入帳金額皆為0的案件">清理已結案(未請款&未入帳=0)</button>
+                <!-- 齒輪按鈕：隱藏/展開圖表 -->
+                <button onclick="toggleCharts()" class="btn bg-gray-600 hover:bg-gray-700 text-lg px-3 py-1" title="隱藏/展開圖表區塊">⚙️</button>
+            </div>
+        </div>
+
+        <!-- 圖表區塊 -->
+        <div id="chartsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 no-print">
+            <div class="bg-white p-4 rounded shadow-sm border border-gray-200 text-center">
+                <h3 class="text-sm font-bold mb-2 text-gray-500">業主案件分佈 (%)</h3>
+                <div class="chart-container"><canvas id="chartClient"></canvas></div>
+            </div>
+            <div class="bg-white p-4 rounded shadow-sm border border-gray-200 text-center">
+                <h3 class="text-sm font-bold mb-2 text-gray-500">委託事項金額佔比 (%)</h3>
+                <div class="chart-container"><canvas id="chartTask"></canvas></div>
+            </div>
+        </div>
+
+        <div id="exportTarget" class="bg-white p-4 rounded-lg">
+            <div id="pdf-header" class="mb-6">
+                <h1 class="text-3xl font-bold text-center text-gray-800">委託案管理與財務統計報表</h1>
+                <p class="text-center text-gray-500 text-sm mt-2">匯出日期：<span id="pdf-date"></span></p>
+                <hr class="mt-4 border-gray-300">
+            </div>
+
+            <div class="shadow rounded-lg border border-gray-200 table-wrapper">
+                <table class="min-w-full text-[12px]">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-2 py-3 text-left">案名/業主</th>
+                            <th class="px-2 py-3 text-right">總金額</th>
+                            <th class="px-2 py-3 text-right text-blue-600">已請款</th>
+                            <th class="px-2 py-3 text-right text-green-600">已入帳</th>
+                            <th class="px-2 py-3 text-right text-orange-500">扣除稅費</th>
+                            <th class="px-2 py-3 text-right text-red-600 font-bold">未入帳</th>
+                            <th class="px-2 py-3 text-right text-amber-600 font-bold">未請款</th>
+                            <th class="px-2 py-3 text-center no-print">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataTableBody" class="divide-y divide-gray-100 bg-white"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- PDF 預覽 Modal -->
+<div id="pdfModal" class="fixed inset-0 z-[100] hidden bg-black bg-opacity-75 flex flex-col items-center justify-center p-4 no-print">
+    <div class="bg-white w-full max-w-5xl h-[90vh] rounded-lg shadow-2xl flex flex-col">
+        <div class="flex justify-between items-center p-3 border-b bg-gray-50 rounded-t-lg">
+            <h3 class="text-lg font-bold text-gray-800">PDF 報表預覽</h3>
+            <div class="flex gap-2">
+                <button id="downloadPdfBtn" class="btn bg-blue-600 hover:bg-blue-700">確認並下載 PDF</button>
+                <button onclick="closePdfModal()" class="btn bg-gray-500 hover:bg-gray-600">關閉</button>
+            </div>
+        </div>
+        <div class="flex-1 w-full p-0 bg-gray-200 rounded-b-lg overflow-hidden">
+            <iframe id="pdfPreviewFrame" class="w-full h-full border-0"></iframe>
+        </div>
+    </div>
+</div>
+
+<script>
+    Chart.register(ChartDataLabels);
+    let projects = JSON.parse(localStorage.getItem('sys_v32_data')) ||[];
+    let charts = {};
+
+    // 全域變數：控制排序與搜尋狀態
+    let currentSortOrder = 'none'; 
+    let isRowSearchVisible = false;
+    let currentSearchQuery = '';
+
+    // 全域變數：控制 PDF 預覽
+    let currentPdf = null;
+    let currentPdfUrl = null;
+
+    // 輔助函數：跳脫 HTML 特殊字元
+    function escapeHTML(str) {
+        return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag]));
+    }
+
+    // 展開/隱藏表格功能選單
+    function toggleTableMenu(e) {
+        e.stopPropagation();
+        const menu = document.getElementById('tableMenu');
+        if(menu) menu.classList.toggle('hidden');
+    }
+
+    // 點擊空白處關閉選單
+    document.addEventListener('click', () => {
+        const menu = document.getElementById('tableMenu');
+        if (menu && !menu.classList.contains('hidden')) {
+            menu.classList.add('hidden');
+        }
+    });
+
+    // 設定排序方式
+    function setSort(order, e) {
+        e.stopPropagation();
+        currentSortOrder = order;
+        document.getElementById('tableMenu').classList.add('hidden');
+        renderTable();
+    }
+
+    // 切換搜尋框顯示狀態
+    function toggleRowSearch(e) {
+        e.stopPropagation();
+        isRowSearchVisible = !isRowSearchVisible;
+        if (!isRowSearchVisible) {
+            currentSearchQuery = ''; // 關閉時清空搜尋
+        }
+        document.getElementById('tableMenu').classList.add('hidden');
+        renderTable();
+        if (isRowSearchVisible) {
+            setTimeout(() => {
+                const el = document.getElementById('rowSearchBox');
+                if(el) el.focus();
+            }, 50);
+        }
+    }
+
+    // 處理搜尋輸入
+    function handleRowSearch(e) {
+        currentSearchQuery = e.target.value;
+        renderTable();
+    }
+
+    function calcTotals() {
+        const totalAmount = parseFloat(document.getElementById('totalAmount').value) || 0;
+        let sumReq = 0, sumIn = 0, sumTax = 0;
+        for(let i=1; i<=4; i++) {
+            sumReq += parseFloat(document.getElementById(`p${i}_req_amt`).value) || 0;
+            sumIn += parseFloat(document.getElementById(`p${i}_in_amt`).value) || 0;
+            sumTax += parseFloat(document.getElementById(`p${i}_tax`).value) || 0;
+        }
+        const totalUnpaid = sumReq - (sumIn + sumTax);
+        const totalRemain = totalAmount - sumReq;
+        document.getElementById('grand_total_display').innerText = totalAmount.toLocaleString();
+        document.getElementById('total_req_display').innerText = sumReq.toLocaleString();
+        document.getElementById('total_tax_display').innerText = sumTax.toLocaleString();
+        document.getElementById('total_in_display').innerText = sumIn.toLocaleString();
+        document.getElementById('total_unpaid_display').innerText = totalUnpaid.toLocaleString();
+        document.getElementById('total_remain_display').innerText = totalRemain.toLocaleString();
+        return { sumReq, sumIn, sumTax, totalUnpaid, totalRemain };
+    }
+
+    function saveData() {
+        if (!document.getElementById('caseName').value) { alert("請輸入案名"); return; }
+        const index = parseInt(document.getElementById('editIndex').value);
+        const t = calcTotals();
+        const project = {
+            caseName: document.getElementById('caseName').value,
+            client: document.getElementById('client').value,
+            taskType: document.getElementById('taskType').value || '未分類',
+            contractDate: document.getElementById('contractDate').value,
+            totalAmount: parseFloat(document.getElementById('totalAmount').value) || 0,
+            referral: document.getElementById('referral').value,
+            consultant: document.getElementById('consultant').value,
+            applyLevel: document.getElementById('applyLevel').value,
+            executor: document.getElementById('executor').value,
+            remarks: document.getElementById('remarks').value,
+            p1: { req: parseFloat(document.getElementById('p1_req_amt').value)||0, date: document.getElementById('p1_req_date').value, in: parseFloat(document.getElementById('p1_in_amt').value)||0, in_date: document.getElementById('p1_in_date').value, tax: parseFloat(document.getElementById('p1_tax').value)||0 },
+            p2: { req: parseFloat(document.getElementById('p2_req_amt').value)||0, date: document.getElementById('p2_req_date').value, in: parseFloat(document.getElementById('p2_in_amt').value)||0, in_date: document.getElementById('p2_in_date').value, tax: parseFloat(document.getElementById('p2_tax').value)||0 },
+            p3: { req: parseFloat(document.getElementById('p3_req_amt').value)||0, date: document.getElementById('p3_req_date').value, in: parseFloat(document.getElementById('p3_in_amt').value)||0, in_date: document.getElementById('p3_in_date').value, tax: parseFloat(document.getElementById('p3_tax').value)||0 },
+            p4: { req: parseFloat(document.getElementById('p4_req_amt').value)||0, date: document.getElementById('p4_req_date').value, in: parseFloat(document.getElementById('p4_in_amt').value)||0, in_date: document.getElementById('p4_in_date').value, tax: parseFloat(document.getElementById('p4_tax').value)||0 },
+            totalReq: t.sumReq, totalIn: t.sumIn, totalTax: t.sumTax, totalUnpaid: t.totalUnpaid, totalRemain: t.totalRemain
+        };
+        if (index === -1) projects.push(project); else projects[index] = project;
+        localStorage.setItem('sys_v32_data', JSON.stringify(projects));
+        alert("儲存成功！");
+        renderTable(); updateCharts(); resetForm();
+    }
+
+    function deleteCompletedProjects() {
+        const toDeleteCount = projects.filter(p => p.totalRemain === 0 && p.totalUnpaid === 0).length;
+        if (toDeleteCount === 0) {
+            alert("目前沒有「未請款且未入帳金額皆為 0」的案件。");
+            return;
+        }
+        if (confirm(`確定要刪除所有「未請款且未入帳金額皆為 0」的案件嗎？\n共計 ${toDeleteCount} 筆資料將被永久移除。`)) {
+            projects = projects.filter(p => !(p.totalRemain === 0 && p.totalUnpaid === 0));
+            localStorage.setItem('sys_v32_data', JSON.stringify(projects));
+            renderTable();
+            updateCharts();
+            alert(`清理完成，已刪除 ${toDeleteCount} 筆案件。`);
+        }
+    }
+
+    function renderTable() {
+        // 記錄當前焦點與游標位置，避免重新渲染時輸入中斷
+        let activeElementId = document.activeElement ? document.activeElement.id : null;
+        let selectionStart = 0;
+        if (activeElementId === 'rowSearchBox') {
+            selectionStart = document.activeElement.selectionStart;
+        }
+
+        const tbody = document.getElementById('dataTableBody');
+        const kw = currentSearchQuery.toLowerCase();
+        tbody.innerHTML = '';
+        let gTotal=0, gReq=0, gIn=0, gTax=0, gUnpaid=0, gRemain=0;
+        
+        // 篩選資料
+        let filteredProjects = projects.filter(p => p.caseName.toLowerCase().includes(kw) || p.client.toLowerCase().includes(kw));
+        
+        // 排序資料
+        if (currentSortOrder === 'asc') {
+            filteredProjects.sort((a, b) => a.caseName.localeCompare(b.caseName, 'zh-TW'));
+        } else if (currentSortOrder === 'desc') {
+            filteredProjects.sort((a, b) => b.caseName.localeCompare(a.caseName, 'zh-TW'));
+        }
+
+        filteredProjects.forEach(p => { gTotal+=p.totalAmount; gReq+=p.totalReq; gIn+=p.totalIn; gTax+=p.totalTax; gUnpaid+=p.totalUnpaid; gRemain+=p.totalRemain; });
+        
+        // 建立黃底總計列 (加入 sticky-total class 讓其固定)
+        const totalTr = document.createElement('tr');
+        totalTr.className = "bg-yellow-50 font-bold sticky-total";
+        totalTr.innerHTML = `
+            <td class="px-2 py-3 text-gray-700 relative">
+                <div class="flex items-center gap-2">
+                    <div class="relative cursor-pointer no-print" onclick="toggleTableMenu(event)">
+                        <div class="p-1 bg-white border border-gray-300 rounded shadow-sm hover:bg-gray-50" title="排列與搜尋">
+                            <svg class="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>
+                        </div>
+                        <div id="tableMenu" class="hidden absolute left-0 top-8 mt-1 bg-white border border-gray-200 shadow-xl rounded-md z-50 w-36 text-sm font-normal text-left">
+                            <div onclick="setSort('asc', event)" class="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center gap-2"><span class="text-blue-500">▲</span> 案名增序</div>
+                            <div onclick="setSort('desc', event)" class="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center gap-2"><span class="text-blue-500">▼</span> 案名減序</div>
+                            <div onclick="setSort('none', event)" class="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center gap-2"><span class="text-gray-400">●</span> 預設排序</div>
+                            <hr class="my-1 border-gray-200">
+                            <div onclick="toggleRowSearch(event)" class="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center gap-2"><span class="text-gray-500">🔍</span> 搜尋</div>
+                        </div>
+                    </div>
+                    <input type="text" id="rowSearchBox" value="${escapeHTML(currentSearchQuery)}" placeholder="搜尋案名/業主..." class="${isRowSearchVisible ? 'block' : 'hidden'} w-32 text-xs p-1.5 border border-gray-300 rounded no-print focus:ring-blue-500 focus:border-blue-500" oninput="handleRowSearch(event)" onclick="event.stopPropagation()">
+                    <span class="${isRowSearchVisible ? 'hidden md:inline' : ''} ml-auto mr-auto">總計 (篩選結果)</span>
+                </div>
+            </td>
+            <td class="px-2 py-3 text-right font-mono">${gTotal.toLocaleString()}</td>
+            <td class="px-2 py-3 text-right font-mono text-blue-600">${gReq.toLocaleString()}</td>
+            <td class="px-2 py-3 text-right font-mono text-green-600">${gIn.toLocaleString()}</td>
+            <td class="px-2 py-3 text-right font-mono text-orange-500">${gTax.toLocaleString()}</td>
+            <td class="px-2 py-3 text-right font-mono text-red-600">${gUnpaid.toLocaleString()}</td>
+            <td class="px-2 py-3 text-right font-mono text-amber-600">${gRemain.toLocaleString()}</td>
+            <td class="no-print"></td>
+        `;
+        tbody.appendChild(totalTr);
+        
+        filteredProjects.forEach((p) => {
+            const originalIndex = projects.indexOf(p);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td class="px-2 py-3"><span class="font-bold">${p.caseName}</span><br><span class="text-gray-400 text-[10px]">${p.client} | 執行：${p.executor || '未設定'}</span></td><td class="px-2 py-3 text-right font-mono">${p.totalAmount.toLocaleString()}</td><td class="px-2 py-3 text-right font-mono text-blue-600">${p.totalReq.toLocaleString()}</td><td class="px-2 py-3 text-right font-mono text-green-600">${p.totalIn.toLocaleString()}</td><td class="px-2 py-3 text-right font-mono text-orange-400">${p.totalTax.toLocaleString()}</td><td class="px-2 py-3 text-right font-mono text-red-600 font-bold">${p.totalUnpaid.toLocaleString()}</td><td class="px-2 py-3 text-right font-mono text-amber-600 font-bold">${p.totalRemain.toLocaleString()}</td><td class="px-2 py-3 text-center no-print"><button onclick="editProject(${originalIndex})" class="text-blue-500 hover:underline">修改</button> <button onclick="deleteProject(${originalIndex})" class="text-red-400 ml-1 hover:underline">刪除</button></td>`;
+            tbody.appendChild(tr);
+        });
+
+        // 恢復搜尋框焦點
+        if (activeElementId === 'rowSearchBox') {
+            const el = document.getElementById('rowSearchBox');
+            if (el) {
+                el.focus();
+                el.setSelectionRange(selectionStart, selectionStart);
+            }
+        }
+    }
+
+    function updateCharts() {
+        const clientStats = {}, taskStats = {};
+        projects.forEach(p => { clientStats[p.client] = (clientStats[p.client] || 0) + 1; taskStats[p.taskType] = (taskStats[p.taskType] || 0) + p.totalAmount; });
+        const options = { responsive: true, maintainAspectRatio: false, plugins: { datalabels: { color:'#fff', formatter: (val, ctx) => { let s = ctx.dataset.data.reduce((a,b)=>a+b,0); return s === 0 ? "0%" : (val*100/s).toFixed(1)+"%"; } } } };
+        if (charts.c1) charts.c1.destroy();
+        charts.c1 = new Chart(document.getElementById('chartClient'), { type: 'pie', data: { labels: Object.keys(clientStats), datasets:[{ data: Object.values(clientStats), backgroundColor:['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6'] }] }, options });
+        if (charts.c2) charts.c2.destroy();
+        charts.c2 = new Chart(document.getElementById('chartTask'), { type: 'doughnut', data: { labels: Object.keys(taskStats), datasets: [{ data: Object.values(taskStats), backgroundColor:['#6366F1','#F43F5E','#14B8A6','#F97316','#EC4899'] }] }, options });
+    }
+
+    function exportXLSX() {
+        const flatData = projects.map(p => ({ "案名": p.caseName, "業主": p.client, "委託事項": p.taskType, "委託日期": p.contractDate, "總金額": p.totalAmount, "介紹人": p.referral, "顧問公司": p.consultant, "申請等級": p.applyLevel, "執行人": p.executor, "備註": p.remarks || "", "簽約金_請款": p.p1.req, "簽約金_日期": p.p1.date, "簽約金_入帳": p.p1.in, "簽約金_入帳日期": p.p1.in_date, "簽約金_稅費": p.p1.tax, "第1期_請款": p.p2.req, "第1期_日期": p.p2.date, "第1期_入帳": p.p2.in, "第1期_入帳日期": p.p2.in_date, "第1期_稅費": p.p2.tax, "第2期_請款": p.p3.req, "第2期_日期": p.p3.date, "第2期_入帳": p.p3.in, "第2期_入帳日期": p.p3.in_date, "第2期_稅費": p.p3.tax, "尾款_請款": p.p4.req, "尾款_日期": p.p4.date, "尾款_入帳": p.p4.in, "尾款_入帳日期": p.p4.in_date, "尾款_稅費": p.p4.tax, "合計已請款": p.totalReq, "合計已入帳": p.totalIn, "合計稅費": p.totalTax, "未入帳": p.totalUnpaid, "未請款": p.totalRemain }));
+        const ws = XLSX.utils.json_to_sheet(flatData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "財務報表");
+        XLSX.writeFile(wb, "委託案管理報表.xlsx");
+    }
+
+    function importData(e) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const wb = XLSX.read(new Uint8Array(event.target.result), {type: 'array'});
+                const rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+                projects = rawData.map(row => ({ caseName: row["案名"] || "", client: row["業主"] || "", taskType: row["委託事項"] || "未分類", contractDate: row["委託日期"] || "", totalAmount: parseFloat(row["總金額"]) || 0, referral: row["介紹人"] || "", consultant: row["顧問公司"] || "", applyLevel: row["申請等級"] || "", executor: row["執行人"] || "張滌淞", remarks: row["備註"] || "", p1: { req: parseFloat(row["簽約金_請款"])||0, date: row["簽約金_日期"]||"", in: parseFloat(row["簽約金_入帳"])||0, in_date: row["簽約金_入帳日期"]||"", tax: parseFloat(row["簽約金_稅費"])||0 }, p2: { req: parseFloat(row["第1期_請款"])||0, date: row["第1期_日期"]||"", in: parseFloat(row["第1期_入帳"])||0, in_date: row["第1期_入帳日期"]||"", tax: parseFloat(row["第1期_稅費"])||0 }, p3: { req: parseFloat(row["第2期_請款"])||0, date: row["第2期_日期"]||"", in: parseFloat(row["第2期_入帳"])||0, in_date: row["第2期_入帳日期"]||"", tax: parseFloat(row["第2期_稅費"])||0 }, p4: { req: parseFloat(row["尾款_請款"])||0, date: row["尾款_日期"]||"", in: parseFloat(row["尾款_入帳"])||0, in_date: row["尾款_入帳日期"]||"", tax: parseFloat(row["尾款_稅費"])||0 }, totalReq: parseFloat(row["合計已請款"])||0, totalIn: parseFloat(row["合計已入帳"])||0, totalTax: parseFloat(row["合計稅費"])||0, totalUnpaid: parseFloat(row["未入帳"])||0, totalRemain: parseFloat(row["未請款"])||0 }));
+                localStorage.setItem('sys_v32_data', JSON.stringify(projects));
+                renderTable(); updateCharts(); alert("匯入成功！");
+            } catch(e) { alert("讀取失敗，請檢查 Excel 格式"); }
+        };
+        reader.readAsArrayBuffer(e.target.files[0]);
+    }
+
+    function editProject(i) {
+        const p = projects[i]; 
+        document.getElementById('editIndex').value = i;
+        document.getElementById('caseName').value = p.caseName;
+        document.getElementById('client').value = p.client;
+        document.getElementById('taskType').value = p.taskType;
+        document.getElementById('totalAmount').value = p.totalAmount;
+        document.getElementById('contractDate').value = p.contractDate;
+        document.getElementById('referral').value = p.referral;
+        document.getElementById('consultant').value = p.consultant;
+        document.getElementById('applyLevel').value = p.applyLevel;
+        document.getElementById('executor').value = p.executor;
+        document.getElementById('remarks').value = p.remarks || ''; 
+        for(let n=1; n<=4; n++) {
+            document.getElementById(`p${n}_req_amt`).value = p[`p${n}`].req;
+            document.getElementById(`p${n}_req_date`).value = p[`p${n}`].date;
+            document.getElementById(`p${n}_in_amt`).value = p[`p${n}`].in;
+            document.getElementById(`p${n}_in_date`).value = p[`p${n}`].in_date;
+            document.getElementById(`p${n}_tax`).value = p[`p${n}`].tax;
+        }
+        calcTotals();
+        document.querySelector('.sidebar').scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function deleteProject(i) { 
+        if(confirm("警告：確定要永久刪除此案件嗎？此動作無法復原。")) { 
+            projects.splice(i, 1); 
+            localStorage.setItem('sys_v32_data', JSON.stringify(projects)); 
+            renderTable(); 
+            updateCharts(); 
+        } 
+    }
+    
+    function resetForm() { document.getElementById('dataForm').reset(); document.getElementById('editIndex').value = "-1"; calcTotals(); }
+
+    // 修改：動態調整表格高度
+    function toggleCharts() {
+        const container = document.getElementById('chartsContainer');
+        const tableWrapper = document.querySelector('.table-wrapper');
+        
+        if (container.style.display === 'none') {
+            container.style.display = 'grid';
+            tableWrapper.style.maxHeight = '310px'; // 恢復預設高度
+        } else {
+            container.style.display = 'none';
+            tableWrapper.style.maxHeight = '450px'; // 展開高度，大約可顯示6列資料
+        }
+    }
+
+    // 關閉 PDF 預覽視窗
+    function closePdfModal() {
+        document.getElementById('pdfModal').classList.add('hidden');
+        document.getElementById('pdfPreviewFrame').src = '';
+        if (currentPdfUrl) {
+            URL.revokeObjectURL(currentPdfUrl);
+            currentPdfUrl = null;
+        }
+        currentPdf = null;
+    }
+
+    async function exportPDF() {
+        const { jsPDF } = window.jspdf;
+        const btn = document.getElementById('pdfBtn');
+        const element = document.getElementById('exportTarget');
+        const wrapper = document.querySelector('.table-wrapper');
+        const pdfHeader = document.getElementById('pdf-header');
+        const stickyHeaders = document.querySelectorAll('thead th');
+        const stickyTotals = document.querySelectorAll('.sticky-total td'); 
+        const noPrintElements = document.querySelectorAll('.no-print');
+        
+        btn.innerText = "產出中...";
+        btn.disabled = true;
+        document.getElementById('pdf-date').innerText = new Date().toLocaleDateString();
+        pdfHeader.style.display = 'block';
+        
+        const originalMaxHeight = wrapper.style.maxHeight;
+        const originalOverflow = wrapper.style.overflow;
+        wrapper.style.maxHeight = 'none';
+        wrapper.style.overflow = 'visible';
+        
+        noPrintElements.forEach(el => el.style.setProperty('display', 'none', 'important'));
+        
+        // 暫時解除固定，避免 PDF 截圖時重疊
+        stickyHeaders.forEach(th => th.style.position = 'static');
+        stickyTotals.forEach(td => td.style.position = 'static');
+        
+        try {
+            const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false, windowWidth: element.scrollWidth, windowHeight: element.scrollHeight });
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            const margin = 10;
+            const contentWidth = pdfWidth - (margin * 2);
+            const contentHeight = (canvas.height * contentWidth) / canvas.width;
+            let heightLeft = contentHeight;
+            let position = margin;
+            pdf.addImage(imgData, 'PNG', margin, position, contentWidth, contentHeight);
+            heightLeft -= (pdfHeight - margin * 2);
+            while (heightLeft > 0) {
+                position = heightLeft - contentHeight + margin;
+                pdf.addPage();
+                pdf.addImage(imgData, 'PNG', margin, position, contentWidth, contentHeight);
+                heightLeft -= (pdfHeight - margin * 2);
+            }
+            
+            // 將生成的 PDF 轉為 Blob URL 並顯示在 Modal 中
+            currentPdf = pdf;
+            const blob = pdf.output('blob');
+            currentPdfUrl = URL.createObjectURL(blob);
+            
+            document.getElementById('pdfPreviewFrame').src = currentPdfUrl;
+            document.getElementById('pdfModal').classList.remove('hidden');
+            
+            // 綁定下載按鈕事件
+            document.getElementById('downloadPdfBtn').onclick = () => {
+                if(currentPdf) {
+                    currentPdf.save(`財務報表_${new Date().getTime()}.pdf`);
+                }
+            };
+
+        } catch (err) { 
+            console.error(err); 
+            alert("PDF 產出失敗"); 
+        } finally {
+            // 恢復 UI 狀態
+            pdfHeader.style.display = 'none';
+            wrapper.style.maxHeight = originalMaxHeight;
+            wrapper.style.overflow = originalOverflow;
+            noPrintElements.forEach(el => el.style.display = '');
+            
+            // 恢復固定狀態
+            stickyHeaders.forEach(th => th.style.position = 'sticky');
+            stickyTotals.forEach(td => td.style.position = 'sticky');
+            
+            btn.innerText = "PDF";
+            btn.disabled = false;
+        }
+    }
+
+    window.onload = () => { renderTable(); updateCharts(); calcTotals(); };
+</script>
+</body>
+</html>
