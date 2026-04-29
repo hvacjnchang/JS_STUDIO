@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>傑昇 HVAC&R - 冷卻水塔補給水量計算</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- Chart.js 與 Datalabels 插件 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+
+  <style>
+    body {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      min-height: 100vh;
+      color: #334155;
+      display: flex;
+      flex-direction: column;
+      padding: 2rem 1rem;
+      box-sizing: border-box;
+    }
+    
+    /* 隱藏 number input 的上下箭頭 */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+    }
+
+    /* 輕盈清爽的漸層底色 */
+    .lively-card {
+      background: linear-gradient(135deg, #38bdf8 0%, #60a5fa 100%);
+      box-shadow: 0 20px 40px -10px rgba(56, 189, 248, 0.4);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .lively-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 25px 50px -12px rgba(56, 189, 248, 0.5);
+    }
+    .floating-icon {
+      animation: float 3s ease-in-out infinite;
+    }
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+      100% { transform: translateY(0px); }
+    }
+
+    /* 畫面上的下拉選單箭頭 */
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+      background-position: right 0.25rem center;
+      background-repeat: no-repeat;
+      background-size: 1.5em 1.5em;
+      padding-right: 1.5rem !important;
+    }
+
+    /* --- 列印模式：強制極限壓縮、保證絕對單頁、修正輸入框擠壓 --- */
+    @page { size: A4 portrait; margin: 12mm 12mm; } 
+    
+    @media print {
+      body { background: white !important; font-size: 0.9rem; padding: 0 !important; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;}
+      .no-print { display: none !important; }
+      
+      #app { margin: 0 auto !important; padding: 0 !important; border: none; box-shadow: none; width: 100% !important; max-width: 100% !important; }
+      
+      /* 修正：分開設定 input 與 select，絕不可強制 width: 100% 導致互相擠壓 */
+      input, select { 
+        border: none !important; 
+        background: transparent !important; 
+        font-weight: bold; 
+        pointer-events: none; 
+        color: #0f172a !important;
+        text-align: center !important; 
+      }
+      
+      input {
+        padding: 0 !important;
+        min-width: 0 !important; /* 確保 flex item 能正常縮放不被裁切 */
+      }
+      
+      select {
+        -webkit-appearance: none; 
+        text-align-last: center !important;
+        background-image: none !important; /* 列印時隱藏下拉箭頭，看起來像純文字 */
+        padding: 0 !important; /* 移除箭頭佔據的空間 */
+      }
+      
+      .input-wrapper { box-shadow: none !important; border: 1px solid #cbd5e1 !important; background-color: #f8fafc !important; overflow: hidden; }
+      
+      .lively-card { background: #f8fafc !important; color: #0f172a !important; box-shadow: none !important; border: 2px solid #e2e8f0 !important; padding: 0.75rem !important; }
+      .lively-card h3, .lively-card p, .lively-card span { color: #475569 !important; }
+      .lively-card .text-5xl, .lively-card .text-6xl { font-size: 2.25rem !important; margin: 0 !important; color: #0f172a !important;}
+      
+      /* 修改：置中對齊並加大左右兩區間距 */
+      .print-grid { 
+        display: grid !important; 
+        grid-template-columns: 40% 48% !important; /* 調整比例以容納更大間距 */
+        justify-content: center !important; /* 整個區塊置中 */
+        gap: 3.5rem !important; /* 加大間距，使畫面不擁擠 */
+      }
+      
+      /* 確保附錄區塊在列印時正確跨越兩個欄位 */
+      .print-grid > .col-span-12 {
+        grid-column: span 2 / span 2 !important;
+      }
+      
+      .chart-container { width: 130px !important; height: 130px !important; margin: 0 auto; padding: 0 !important; border: none !important;}
+      
+      /* 極限壓縮所有間距 */
+      .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem !important; }
+      .mb-5 { margin-bottom: 0.25rem !important; }
+      .pb-4 { padding-bottom: 0.25rem !important; }
+      .p-5 { padding: 0.5rem 0.75rem !important; }
+      h1.text-2xl { font-size: 1.5rem !important; }
+      
+      .print-avoid-break { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body class="antialiased">
+
+  <!-- 列印浮水印 -->
+  <img src="logo.png" alt="Watermark" class="fixed inset-0 m-auto w-2/3 md:w-1/2 opacity-[0.08] hidden print:block z-50 pointer-events-none object-contain">
+
+  <!-- 主容器 (列印時取消 my-auto) -->
+  <div id="app" class="bg-white/90 backdrop-blur-xl shadow-2xl rounded-3xl w-full max-w-5xl p-5 md:p-8 border border-white my-auto print:my-0">
+    
+    <!-- 頂部：標題與功能列 (加入 print:justify-center 讓列印時標題也置中) -->
+    <div class="flex flex-col md:flex-row justify-between items-center mb-5 border-b border-slate-200 pb-4 print:justify-center">
+      <div class="text-center md:text-left mb-4 md:mb-0 flex items-center justify-center md:justify-start print:justify-center">
+        <img src="logo.png" alt="傑昇 Logo" class="h-10 mr-3 object-contain" onerror="this.style.display='none'">
+        <div>
+          <h1 class="text-2xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-cyan-500 tracking-tight">冷卻水塔補給水量計算</h1>
+          <p class="text-slate-500 mt-0.5 font-medium text-xs">系統耗水分析與報告</p>
+        </div>
+      </div>
+
+      <div class="flex space-x-2 no-print">
+        <input type="file" id="fileInput" @change="importData" accept=".json" class="hidden">
+        <button @click="triggerImport" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold transition-colors flex items-center">
+          📥 匯入
+        </button>
+        <button @click="exportData" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold transition-colors flex items-center">
+          📤 匯出
+        </button>
+        <button @click="printReport" class="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-sm font-semibold transition-colors flex items-center border border-indigo-200 shadow-sm">
+          🖨️ 預覽/列印報告
+        </button>
+      </div>
+    </div>
+
+    <!-- 內容區網格 -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 print-grid">
+      
+      <!-- 左側：輸入參數區 -->
+      <div class="lg:col-span-5 space-y-4">
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <h2 class="text-base font-bold text-slate-800 flex items-center">⚙️ 運轉參數設定</h2>
+          
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">循環水量 (Circulating Water)</label>
+            <div class="flex rounded-lg input-wrapper border border-gray-300">
+              <input type="number" v-model.number="L" class="flex-1 w-full rounded-l-lg border-none px-3 py-2 focus:ring-2 focus:ring-blue-500 bg-slate-50/50">
+              <select v-model="inVolUnit" class="px-2 md:px-3 rounded-r-lg border-l border-gray-300 bg-slate-100 text-slate-600 font-medium cursor-pointer min-w-[90px] text-center focus:outline-none text-sm">
+                <option value="m3/hr">m³/hr</option>
+                <option value="gpm">GPM</option>
+                <option value="l/s">L/s</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex space-x-3">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-slate-700 mb-1">進水溫度 (T1)</label>
+              <div class="flex rounded-lg input-wrapper border border-gray-300">
+                <input type="number" v-model.number="T1" class="flex-1 w-full rounded-l-lg border-none px-3 py-2 focus:ring-2 focus:ring-blue-500 bg-slate-50/50">
+                <span class="flex items-center justify-center px-2 bg-slate-100 text-slate-600 border-l border-gray-300 min-w-[45px] rounded-r-lg text-sm">{{ inTempLabel }}</span>
+              </div>
+            </div>
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-slate-700 mb-1">出水溫度 (T2)</label>
+              <div class="flex rounded-lg input-wrapper border border-gray-300">
+                <input type="number" v-model.number="T2" class="flex-1 w-full rounded-l-lg border-none px-3 py-2 focus:ring-2 focus:ring-blue-500 bg-slate-50/50">
+                <select v-model="inTempUnit" class="px-1 bg-slate-100 text-slate-600 border-l border-gray-300 font-medium cursor-pointer min-w-[55px] rounded-r-lg text-center focus:outline-none text-sm">
+                  <option value="C">°C</option>
+                  <option value="F">°F</option>
+                  <option value="K">K</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">濃縮倍數 (COC)</label>
+              <div class="flex rounded-lg input-wrapper border border-gray-300">
+                <input type="number" v-model.number="COC" step="0.1" class="flex-1 w-full rounded-l-lg border-none px-3 py-2 focus:ring-2 focus:ring-blue-500 bg-slate-50/50">
+                <span class="inline-flex items-center justify-center px-2 bg-slate-100 text-slate-600 border-l border-gray-300 min-w-[40px] rounded-r-lg text-sm">倍</span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">飛濺損失 (Drift)</label>
+              <div class="flex rounded-lg input-wrapper border border-gray-300">
+                <input type="number" v-model.number="W_pct" step="0.01" class="flex-1 w-full rounded-l-lg border-none px-3 py-2 focus:ring-2 focus:ring-blue-500 bg-slate-50/50">
+                <span class="inline-flex items-center justify-center px-2 bg-slate-100 text-slate-600 border-l border-gray-300 min-w-[40px] rounded-r-lg text-sm">%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右側：計算結果與圖表區 -->
+      <div class="lg:col-span-7 flex flex-col space-y-4">
+        
+        <div class="flex justify-end no-print -mb-1">
+          <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+            <button @click="outUnitSys = 'metric'" :class="['px-4 py-1 text-sm font-semibold rounded-md transition-all', outUnitSys === 'metric' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700']">公制</button>
+            <button @click="outUnitSys = 'imperial'" :class="['px-4 py-1 text-sm font-semibold rounded-md transition-all', outUnitSys === 'imperial' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700']">英制</button>
+            <button @click="outUnitSys = 'si'" :class="['px-4 py-1 text-sm font-semibold rounded-md transition-all', outUnitSys === 'si' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700']">SI制</button>
+          </div>
+        </div>
+
+        <!-- 總補水量大卡片 -->
+        <div class="lively-card rounded-3xl p-6 text-white relative overflow-hidden flex-shrink-0">
+          <div class="absolute -right-10 -top-10 opacity-20 floating-icon z-0">
+            <svg class="w-40 h-40" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+          </div>
+          
+          <div class="relative z-10 flex flex-col items-center text-center">
+            <h3 class="text-blue-50 text-base font-medium mb-1 tracking-wide">總補水量 (Total Make-up Water)</h3>
+            <div class="text-5xl md:text-6xl font-black tracking-tight my-1 drop-shadow-md">
+              {{ formatNum(M_disp) }} <span class="text-xl md:text-2xl font-semibold opacity-90">{{ outUnitLabel }}</span>
+            </div>
+            <p class="text-xs text-blue-100 font-light bg-black/10 px-3 py-1 rounded-full backdrop-blur-sm mt-1">M = 蒸發(E) + 飛濺(W) + 排放(B)</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center flex-1">
+          <!-- 各項損失明細 (套用高對比新顏色) -->
+          <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 h-full flex flex-col justify-center space-y-3">
+            <h4 class="text-slate-400 text-xs font-bold tracking-widest uppercase mb-1">Loss Details</h4>
+            
+            <div class="flex justify-between items-center border-b border-slate-50 pb-2">
+              <div class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-cyan-500 mr-2"></span><span class="text-slate-600 font-medium text-sm">蒸發 (Evaporation)</span></div>
+              <div class="font-bold text-slate-800">{{ formatNum(E_disp) }} <span class="text-xs font-normal text-slate-500 ml-1">{{ outUnitLabel }}</span></div>
+            </div>
+            
+            <div class="flex justify-between items-center border-b border-slate-50 pb-2">
+              <div class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 mr-2"></span><span class="text-slate-600 font-medium text-sm">飛濺 (Drift)</span></div>
+              <div class="font-bold text-slate-800">{{ formatNum(W_disp) }} <span class="text-xs font-normal text-slate-500 ml-1">{{ outUnitLabel }}</span></div>
+            </div>
+            
+            <div class="flex justify-between items-center">
+              <div class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 mr-2"></span><span class="text-slate-600 font-medium text-sm">排放 (Blowdown)</span></div>
+              <div class="font-bold text-slate-800">{{ formatNum(B_disp) }} <span class="text-xs font-normal text-slate-500 ml-1">{{ outUnitLabel }}</span></div>
+            </div>
+          </div>
+
+          <!-- 圓餅圖 -->
+          <div class="bg-white rounded-2xl p-3 shadow-sm border border-slate-100 flex items-center justify-center chart-container h-full min-h-[160px]">
+            <canvas id="lossChart" width="160" height="160"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 列印專用的計算過程附錄 -->
+      <div class="hidden print:block col-span-12 mt-1 pt-2 border-t border-slate-200 print-avoid-break">
+        <h3 class="text-[14px] font-bold text-slate-800 mb-1 flex items-center">
+          <svg class="w-4 h-4 mr-1 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+          計算公式與推導過程
+        </h3>
+        
+        <div class="text-slate-700 bg-slate-50/50 p-2.5 rounded-lg border border-slate-200 flex flex-col space-y-1.5">
+          
+          <div class="pb-1.5 border-b border-slate-200">
+            <div class="flex items-baseline justify-between mb-0.5">
+              <p class="font-bold text-cyan-600 text-[12px]">1. 蒸發損失 (Evaporation, E)</p>
+              <code class="text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shadow-sm">E = 循環水量(公制) × 溫差(ΔT) × 0.00153</code>
+            </div>
+            <p class="text-[11px] ml-1 font-mono text-slate-800 flex flex-wrap items-center">
+              <span>計算：{{ formatNum(L_base) }} × {{ formatNum(deltaT_base) }} × 0.00153 = <strong class="text-[12px]">{{ formatNum(E_base) }} m³/hr</strong></span>
+              <span class="text-[10px] text-slate-500 font-sans ml-3">↳ 換算：{{ formatNum(E_base * 4.40287) }} GPM ｜ {{ formatNum(E_base * 0.27778) }} L/s</span>
+            </p>
+          </div>
+          
+          <div class="pb-1.5 border-b border-slate-200">
+            <div class="flex items-baseline justify-between mb-0.5">
+              <p class="font-bold text-amber-600 text-[12px]">2. 飛濺損失 (Drift, W)</p>
+              <code class="text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shadow-sm">W = 循環水量(公制) × 飛濺率(%)</code>
+            </div>
+            <p class="text-[11px] ml-1 font-mono text-slate-800 flex flex-wrap items-center">
+              <span>計算：{{ formatNum(L_base) }} × {{ W_pct }}% = <strong class="text-[12px]">{{ formatNum(W_base) }} m³/hr</strong></span>
+              <span class="text-[10px] text-slate-500 font-sans ml-3">↳ 換算：{{ formatNum(W_base * 4.40287) }} GPM ｜ {{ formatNum(W_base * 0.27778) }} L/s</span>
+            </p>
+          </div>
+          
+          <div class="pb-1.5 border-b border-slate-200">
+            <div class="flex items-baseline justify-between mb-0.5">
+              <p class="font-bold text-rose-600 text-[12px]">3. 排放損失 (Blowdown, B)</p>
+              <code class="text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shadow-sm">B = E / (COC - 1) - W</code>
+            </div>
+            <p class="text-[11px] ml-1 font-mono text-slate-800 flex flex-wrap items-center">
+              <span>計算：{{ formatNum(E_base) }} / ({{ COC }} - 1) - {{ formatNum(W_base) }} = <strong class="text-[12px]">{{ formatNum(B_base) }} m³/hr</strong></span>
+              <span class="text-[10px] text-slate-500 font-sans ml-3">↳ 換算：{{ formatNum(B_base * 4.40287) }} GPM ｜ {{ formatNum(B_base * 0.27778) }} L/s</span>
+            </p>
+          </div>
+
+          <div class="pt-0.5 flex justify-between items-center">
+            <div>
+              <p class="font-bold text-slate-900 text-[13px] mb-0.5">⭐ 總補水量 (Total Make-up Water, M)</p>
+              <p class="text-[12px] ml-1 font-mono text-slate-800">
+                計算：{{ formatNum(E_base) }} + {{ formatNum(W_base) }} + {{ formatNum(B_base) }} = <strong class="text-blue-600 text-[13px]">{{ formatNum(M_base) }} m³/hr</strong>
+              </p>
+            </div>
+            <div class="text-right bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-sm">
+              <p class="text-[10px] text-slate-600 font-bold leading-tight">
+                英制：{{ formatNum(M_base * 4.40287) }} GPM<br>
+                SI制：{{ formatNum(M_base * 0.27778) }} L/s
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    Chart.register(ChartDataLabels);
+
+    const { createApp, ref, computed, onMounted, watch } = Vue;
+
+    createApp({
+      setup() {
+        const outUnitSys = ref('metric'); 
+        
+        const L = ref(1000);
+        const inVolUnit = ref('m3/hr');
+        const T1 = ref(37);
+        const T2 = ref(32);
+        const inTempUnit = ref('C');
+        const COC = ref(5);
+        const W_pct = ref(0.1);
+
+        const outUnitLabel = computed(() => {
+          if (outUnitSys.value === 'imperial') return 'GPM';
+          if (outUnitSys.value === 'si') return 'L/s';
+          return 'm³/hr';
+        });
+
+        const inTempLabel = computed(() => {
+          if (inTempUnit.value === 'F') return '°F';
+          if (inTempUnit.value === 'K') return 'K';
+          return '°C';
+        });
+
+        const L_base = computed(() => {
+          if (inVolUnit.value === 'gpm') return L.value * 0.227125;
+          if (inVolUnit.value === 'l/s') return L.value * 3.6;
+          return L.value;
+        });
+
+        const deltaT_base = computed(() => {
+          let dt = Math.max(0, T1.value - T2.value);
+          if (inTempUnit.value === 'F') return dt * (5/9);
+          return dt;
+        });
+
+        const EVAP_FACTOR = 0.00153;
+        
+        const E_base = computed(() => L_base.value * deltaT_base.value * EVAP_FACTOR);
+        const W_base = computed(() => L_base.value * (W_pct.value / 100));
+        const B_base = computed(() => {
+          if (COC.value <= 1) return 0;
+          return Math.max(0, (E_base.value / (COC.value - 1)) - W_base.value);
+        });
+        const M_base = computed(() => E_base.value + W_base.value + B_base.value);
+
+        const convertVal = (val) => {
+          if (outUnitSys.value === 'imperial') return val * 4.40287;
+          if (outUnitSys.value === 'si') return val * 0.27778;
+          return val;
+        };
+
+        const E_disp = computed(() => convertVal(E_base.value));
+        const W_disp = computed(() => convertVal(W_base.value));
+        const B_disp = computed(() => convertVal(B_base.value));
+        const M_disp = computed(() => convertVal(M_base.value));
+
+        const formatNum = (num) => Number(num).toFixed(2);
+
+        const exportData = () => {
+          const data = { 
+            L: L.value, inVolUnit: inVolUnit.value,
+            T1: T1.value, T2: T2.value, inTempUnit: inTempUnit.value,
+            COC: COC.value, W_pct: W_pct.value, outUnitSys: outUnitSys.value 
+          };
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'cooling-tower-report.json';
+          a.click(); URL.revokeObjectURL(url);
+        };
+
+        const triggerImport = () => document.getElementById('fileInput').click();
+        
+        const importData = (e) => {
+          const file = e.target.files[0];
+          if(!file) return;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const res = JSON.parse(event.target.result);
+              if(res.outUnitSys) outUnitSys.value = res.outUnitSys;
+              if(res.inVolUnit) inVolUnit.value = res.inVolUnit;
+              if(res.inTempUnit) inTempUnit.value = res.inTempUnit;
+              if(res.L) L.value = res.L;
+              if(res.T1) T1.value = res.T1;
+              if(res.T2) T2.value = res.T2;
+              if(res.COC) COC.value = res.COC;
+              if(res.W_pct) W_pct.value = res.W_pct;
+            } catch (err) { alert("檔案格式錯誤"); }
+          };
+          reader.readAsText(file);
+          e.target.value = '';
+        };
+
+        const printReport = () => window.print();
+
+        let chartInstance = null;
+        onMounted(() => {
+          const ctx = document.getElementById('lossChart').getContext('2d');
+          chartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+              labels:['蒸發 (E)', '飛濺 (W)', '排放 (B)'],
+              datasets:[{
+                data:[E_disp.value, W_disp.value, B_disp.value],
+                backgroundColor:['#06b6d4', '#fbbf24', '#f43f5e'],
+                borderWidth: 0,
+                hoverOffset: 4
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { 
+                  position: 'bottom', 
+                  labels: { usePointStyle: true, boxWidth: 8, font: {size: 11} } 
+                },
+                tooltip: { 
+                  callbacks: { 
+                    label: (ctx) => ` ${ctx.label}: ${ctx.raw.toFixed(2)} ${outUnitLabel.value}` 
+                  } 
+                },
+                datalabels: {
+                  color: '#ffffff',
+                  font: { weight: 'bold', size: 12 },
+                  formatter: (value, ctx) => {
+                    let sum = 0;
+                    let dataArr = ctx.chart.data.datasets[0].data;
+                    dataArr.forEach(data => { sum += data; });
+                    if (sum === 0 || value === 0) return '';
+                    let percentage = (value * 100 / sum).toFixed(1) + "%";
+                    return percentage;
+                  }
+                }
+              },
+              cutout: '55%'
+            }
+          });
+        });
+
+        watch([E_disp, W_disp, B_disp, outUnitLabel], ([newE, newW, newB, newUnit]) => {
+          if (chartInstance) {
+            chartInstance.data.datasets[0].data =[newE, newW, newB];
+            chartInstance.options.plugins.tooltip.callbacks.label = (ctx) => ` ${ctx.label}: ${ctx.raw.toFixed(2)} ${newUnit}`;
+            chartInstance.update();
+          }
+        });
+
+        return {
+          outUnitSys, outUnitLabel,
+          L, inVolUnit, T1, T2, inTempUnit, inTempLabel, COC, W_pct,
+          E_disp, W_disp, B_disp, M_disp,
+          L_base, deltaT_base, E_base, W_base, B_base, M_base,
+          formatNum, exportData, triggerImport, importData, printReport
+        }
+      }
+    }).mount('#app')
+  </script>
+</body>
+</html>
