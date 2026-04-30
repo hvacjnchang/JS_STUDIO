@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>傑昇冷凍空調技師事務所 - 報價單系統 v14 (Web版)</title>
+    <!-- 使用 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Vue.js 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入 localforage (用於瀏覽器端 IndexedDB 大容量資料庫) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+    <style>
+        /* =========================================
+           A4 紙張設定
+           ========================================= */
+        .a4-page {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 15mm 15mm;
+            margin: 40px auto;
+            background: white;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            position: relative;
+            box-sizing: border-box;
+            font-family: "BiauKai", "DFKai-SB", "PMingLiU", serif;
+            color: #000;
+        }
+
+        .quote-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 2px solid #000;
+            table-layout: fixed; 
+        }
+        .quote-table th, .quote-table td {
+            border: 1px solid #000;
+            padding: 4px 5px;
+            font-size: 11pt;
+            vertical-align: top;
+            word-wrap: break-word;
+        }
+        .quote-table th {
+            background-color: #f3f3f3;
+            text-align: center;
+            font-weight: bold;
+            border-bottom: 2px solid #000;
+        }
+
+        /* =========================================
+           印章區塊設定
+           ========================================= */
+        .stamp-container {
+            position: relative;
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            pointer-events: none;
+            width: 100%;
+            height: auto;
+        }
+
+        .img-stamp {
+            height: auto;
+            max-height: 100px;
+            max-width: 120px;
+            object-fit: contain;
+            opacity: 0.95;
+            transform: rotate(-2deg); 
+        }
+
+        .css-stamp {
+            width: 90px;
+            height: 90px;
+            border: 3px double #e00;
+            color: #e00;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-family: "KaiTi", serif;
+            transform: rotate(-3deg);
+            opacity: 0.9;
+            border-radius: 4px;
+            font-weight: bold;
+            text-align: center;
+            line-height: 1.2;
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* =========================================
+           版面佈局
+           ========================================= */
+        body { margin: 0; padding: 0; height: 100vh; overflow: hidden; background-color: #525659; }
+        #app { display: flex; height: 100%; }
+        .control-panel { width: 360px; flex-shrink: 0; background: white; border-right: 1px solid #ccc; overflow-y: auto; display: flex; flex-direction: column; z-index: 20; }
+        .preview-area { flex: 1; overflow: auto; background-color: #525659; display: flex; justify-content: center; align-items: flex-start; padding-bottom: 100px; }
+
+        @media print {
+            @page { size: A4; margin: 15mm 10mm 15mm 10mm; }
+            body { background: white; height: auto; overflow: visible; }
+            .control-panel, .no-print { display: none !important; }
+            .preview-area { display: block; overflow: visible; background: white; padding: 0; margin: 0; height: auto; }
+            .a4-page { margin: 0; box-shadow: none; width: 100%; page-break-after: always; padding: 0 5mm; min-height: auto; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+
+    <!-- 左側：輸入控制面板 -->
+    <div class="control-panel no-print">
+        <!-- 頂部標題 -->
+        <div class="p-3 bg-blue-900 text-white flex justify-between items-center shadow">
+            <h2 class="font-bold">報價單系統 v14-Web</h2>
+            <div class="space-x-1">
+                <button @click="resetForm" class="text-xs bg-blue-700 px-2 py-1 rounded hover:bg-blue-600">重置</button>
+                <button @click="printQuote" class="text-xs bg-yellow-500 text-black font-bold px-2 py-1 rounded hover:bg-yellow-400">🖨️ 列印</button>
+            </div>
+        </div>
+
+        <!-- 內容捲動區 -->
+        <div class="p-4 space-y-4 flex-1 overflow-y-auto bg-gray-50">
+            
+            <!-- 檔案管理區 -->
+            <div class="bg-amber-50 p-3 rounded border border-amber-200 shadow-sm">
+                <h3 class="text-sm font-bold text-amber-800 mb-2 border-b border-amber-200 pb-1">單筆報價單檔案</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <button @click="exportData" class="text-xs bg-gray-700 text-white py-2 rounded hover:bg-gray-600 flex justify-center items-center font-bold">
+                        ⬇️ 匯出單筆
+                    </button>
+                    <label class="text-xs bg-gray-200 text-gray-700 py-2 rounded hover:bg-gray-300 flex justify-center items-center cursor-pointer">
+                        📂 匯入單筆
+                        <input type="file" accept=".json" @change="importData" class="hidden">
+                    </label>
+                </div>
+            </div>
+
+            <!-- 瀏覽器資料庫區塊 (取代原本的 Python DB) -->
+            <div class="bg-indigo-50 p-3 rounded border border-indigo-200 shadow-sm">
+                <h3 class="text-sm font-bold text-indigo-800 mb-2 border-b border-indigo-200 pb-1 flex justify-between items-center">
+                    本機資料庫
+                    <div class="space-x-1 flex items-center">
+                        <button @click="exportAllDb" class="text-[10px] bg-indigo-200 px-1.5 py-0.5 rounded text-indigo-800 hover:bg-indigo-300" title="備份全部資料庫">匯出全部</button>
+                        <label class="text-[10px] bg-indigo-200 px-1.5 py-0.5 rounded text-indigo-800 hover:bg-indigo-300 cursor-pointer" title="還原資料庫">
+                            匯入全部<input type="file" accept=".json" @change="importAllDb" class="hidden">
+                        </label>
+                    </div>
+                </h3>
+                
+                <!-- 存入按鈕 -->
+                <button @click="saveToDatabase" class="w-full bg-indigo-600 text-white py-2 rounded text-sm hover:bg-indigo-500 shadow-sm font-bold mb-3">
+                    ☁️ 存入/更新資料庫
+                </button>
+
+                <!-- 資料庫列表 -->
+                <div v-if="dbList.length > 0" class="max-h-48 overflow-y-auto border border-indigo-100 rounded bg-white">
+                    <ul class="divide-y divide-indigo-100">
+                        <li v-for="(item, idx) in dbList" :key="idx" class="p-2 text-xs hover:bg-indigo-50 group">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-bold text-indigo-700">{{ item.quoteNo }}</span>
+                                <span class="text-[10px] text-gray-400">{{ item.date }}</span>
+                            </div>
+                            <div class="text-gray-600 truncate mb-2">{{ item.clientName }}</div>
+                            <div class="flex justify-end space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                                <button @click="loadFromDb(item.quoteNo)" class="bg-green-100 text-green-700 px-2 py-0.5 rounded hover:bg-green-200">載入</button>
+                                <button @click="deleteFromDb(item.quoteNo)" class="bg-red-100 text-red-700 px-2 py-0.5 rounded hover:bg-red-200">刪除</button>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+                <div v-else class="text-center text-xs text-gray-400 py-2">
+                    (資料庫無資料)
+                </div>
+                <p class="text-[10px] text-gray-400 mt-2 text-center">*資料存於當前瀏覽器，請定期匯出備份</p>
+            </div>
+            
+            <!-- 瀏覽器暫存區 -->
+            <div class="bg-white p-2 rounded border shadow-sm">
+                <div class="flex justify-between items-center mb-1">
+                    <p class="text-xs font-bold text-gray-500">瀏覽器暫存 (Ctrl+S)</p>
+                    <button @click="clearHistory" class="text-[10px] text-red-400 hover:text-red-600">清空</button>
+                </div>
+                <button @click="saveLocalQuote" class="w-full bg-gray-500 text-white py-1 rounded text-xs hover:bg-gray-400 mb-2">暫存至瀏覽器</button>
+                
+                <ul v-if="historyList.length > 0" class="space-y-1 max-h-32 overflow-y-auto">
+                    <li v-for="(h, i) in historyList" :key="i" class="text-xs bg-gray-50 p-2 border rounded cursor-pointer hover:bg-blue-50 flex justify-between group" @click="loadQuote(i)">
+                        <span class="truncate pr-2">{{ h.quoteNo }}</span>
+                        <span class="text-gray-400 group-hover:text-blue-500 whitespace-nowrap">載入</span>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- 用章設定 -->
+            <div class="bg-white p-3 rounded border border-blue-200 shadow-sm">
+                <h3 class="text-sm font-bold text-blue-800 mb-2 border-b pb-1">公司用章設定</h3>
+                <div class="space-y-2">
+                    <input type="file" multiple accept="image/*" @change="handleFileUpload" class="w-full text-xs border p-1 rounded">
+                    <div v-if="form.stamps && form.stamps.length > 0" class="flex flex-wrap justify-center gap-2 bg-gray-100 p-2 rounded">
+                        <div v-for="(img, idx) in form.stamps" :key="idx" class="relative group">
+                            <img :src="img" class="h-12 border bg-white rounded object-contain">
+                            <button @click="removeStamp(idx)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center">×</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 基本資料 -->
+            <div class="bg-white p-3 rounded border shadow-sm">
+                <h3 class="text-sm font-bold text-gray-700 mb-2 border-b pb-1">基本資料</h3>
+                <div class="space-y-2 text-sm">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs text-gray-500">報價單編號</label>
+                            <input v-model="form.quoteNo" class="w-full border rounded px-2 py-1 font-bold text-blue-700">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500">日期</label>
+                            <input v-model="form.date" class="w-full border rounded px-2 py-1">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500">客戶名稱</label>
+                        <input v-model="form.clientName" class="w-full border rounded px-2 py-1">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs text-gray-500">受文者</label>
+                            <input v-model="form.recipient" class="w-full border rounded px-2 py-1">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500">電話</label>
+                            <input v-model="form.clientPhone" class="w-full border rounded px-2 py-1">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500">工程名稱</label>
+                        <input v-model="form.projectName" class="w-full border rounded px-2 py-1">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500">工程地點</label>
+                        <input v-model="form.location" class="w-full border rounded px-2 py-1">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 報價項目 -->
+            <div class="bg-white p-3 rounded border shadow-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-gray-700">報價明細</h3>
+                    <button @click="addItem" class="text-xs bg-green-600 text-white px-2 py-1 rounded">+ 新增</button>
+                </div>
+                <div v-for="(item, idx) in form.items" :key="idx" class="mb-3 p-2 border rounded bg-gray-50 relative">
+                    <button @click="removeItem(idx)" class="absolute top-1 right-1 text-red-500 font-bold px-2 text-sm">×</button>
+                    <div class="grid grid-cols-6 gap-2 text-sm mb-1">
+                        <div class="col-span-1">
+                            <label class="text-[10px] text-gray-500">項次</label>
+                            <input v-model="item.id" class="w-full border text-center">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="text-[10px] text-gray-500">單位</label>
+                            <input v-model="item.unit" class="w-full border text-center">
+                        </div>
+                        <div class="col-span-3">
+                            <label class="text-[10px] text-gray-500">數量</label>
+                            <input type="number" v-model="item.qty" class="w-full border text-center">
+                        </div>
+                    </div>
+                    <div class="mb-1">
+                        <label class="text-[10px] text-gray-500">名稱規格</label>
+                        <textarea v-model="item.name" rows="3" class="w-full border text-sm"></textarea>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-gray-500">單價</label>
+                        <input type="number" v-model="item.price" class="w-full border text-right">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 備註 -->
+            <div class="bg-white p-3 rounded border shadow-sm">
+                <label class="text-sm font-bold text-gray-700 block mb-1">備註條款</label>
+                <textarea v-model="form.notes" rows="6" class="w-full border rounded px-2 py-1 text-xs"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右側：即時預覽區 -->
+    <div class="preview-area">
+        <div class="a4-page">
+            
+            <!-- Header -->
+            <div class="border-2 border-black p-2 mb-2 relative">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h1 class="text-2xl font-bold mb-1" style="font-family: PMingLiU, serif;">傑昇冷凍空調技師事務所</h1>
+                        <h2 class="text-sm font-bold mb-1">CTS HVAC & R STUDIO</h2>
+                        <p class="text-xs">新北市板橋區陽明街23巷9號1樓 (hvac.jn@msa.hinet.net)</p>
+                        <p class="text-xs">Tel：02-23512325  Fax：02-23512326</p>
+                    </div>
+                    <div class="text-right text-xs mt-3 leading-relaxed">
+                        <p>聯絡人： 張滌淞</p>
+                        <p>電 話： 0939-922-456</p>
+                    </div>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="text-2xl font-bold border-b-2 border-black px-8 py-1 tracking-[1em] ml-4">報價單</span>
+                </div>
+            </div>
+
+            <!-- Client Info -->
+            <div class="text-[11pt] leading-7 mb-3 px-1">
+                <div class="flex">
+                    <div class="w-[62%]"><span class="font-bold">報價單編號：</span>{{ form.quoteNo }}</div>
+                    <div class="w-[38%]"><span class="font-bold">日 期：</span>{{ form.date }}</div>
+                </div>
+                <div class="flex">
+                    <div class="w-[62%]"><span class="font-bold">公 司：</span>{{ form.clientName }}</div>
+                    <div class="w-[38%]"><span class="font-bold">受文者：</span>{{ form.recipient }}</div>
+                </div>
+                <div class="flex">
+                    <div class="w-[62%]"><span class="font-bold">工程名稱：</span>{{ form.projectName }}</div>
+                    <div class="w-[38%]"><span class="font-bold">電 話：</span>{{ form.clientPhone }}</div>
+                </div>
+                <div class="flex">
+                    <div class="w-full"><span class="font-bold">工程地點：</span>{{ form.location }}</div>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <table class="quote-table mb-2">
+                <colgroup>
+                    <col style="width: 6%">
+                    <col style="width: 48%">
+                    <col style="width: 8%">
+                    <col style="width: 8%">
+                    <col style="width: 14%">
+                    <col style="width: 16%">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>項 目</th>
+                        <th>名 稱 規 格</th>
+                        <th>單 位</th>
+                        <th>數 量</th>
+                        <th>單 價</th>
+                        <th>複 價</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="item in form.items" :key="item.id">
+                        <td class="text-center font-bold">{{ item.id }}</td>
+                        <td style="white-space: pre-wrap; text-align: left;">{{ item.name }}</td>
+                        <td class="text-center">{{ item.unit }}</td>
+                        <td class="text-center">{{ item.qty }}</td>
+                        <td class="text-right">{{ item.price.toLocaleString() }}</td>
+                        <td class="text-right">{{ (item.qty * item.price).toLocaleString() }}</td>
+                    </tr>
+                    <tr>
+                        <td style="border-bottom: none;"></td>
+                        <td style="border-bottom: none; font-size: 10pt; font-weight: bold; padding-top: 2px; padding-bottom: 2px; line-height: 1.2;">以下空白</td>
+                        <td style="border-bottom: none;"></td>
+                        <td style="border-bottom: none;"></td>
+                        <td style="border-bottom: none;"></td>
+                        <td style="border-bottom: none;"></td>
+                    </tr>
+                    <tr>
+                        <td style="border-top: none; height: 30px;"></td>
+                        <td style="border-top: none;"></td>
+                        <td style="border-top: none;"></td>
+                        <td style="border-top: none;"></td>
+                        <td style="border-top: none;"></td>
+                        <td style="border-top: none;"></td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr style="background-color: #f0f0f0; border-top: 2px solid black;">
+                        <td colspan="2" class="text-center text-lg font-bold tracking-widest">合 計</td>
+                        <td class="text-center font-bold">式</td>
+                        <td class="text-center font-bold">1</td>
+                        <td></td>
+                        <td class="text-right text-lg font-bold">{{ totalAmount.toLocaleString() }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+
+            <!-- Total -->
+            <div class="font-bold mb-4 px-1 py-1 text-[11pt] bg-gray-50 border-b border-gray-200">
+                報價總金額：{{ chineseTotal }} (含稅) 
+                <span class="text-xs font-normal ml-2 text-gray-600">(※請代扣稅額10%繳稅，年底開立扣繳憑單。)</span>
+            </div>
+
+            <!-- Notes -->
+            <div class="text-[10pt] mb-6 px-1" style="white-space: pre-wrap; line-height: 1.5;">備註：
+{{ form.notes }}</div>
+
+            <!-- Signature -->
+            <div class="flex justify-between px-16 mt-8 pb-8 items-start">
+                <div class="text-center w-1/2">
+                    <p class="mb-2 font-bold text-lg">(甲 方)</p>
+                    <p class="text-xl font-bold font-serif">{{ form.clientName }}</p>
+                </div>
+                
+                <div class="text-center w-1/2 flex flex-col items-center">
+                    <p class="mb-2 font-bold text-lg">(乙 方)</p>
+                    <p class="text-xl font-bold font-serif">傑昇冷凍空調技師事務所</p>
+                    <div class="stamp-container">
+                        <template v-if="form.stamps && form.stamps.length > 0">
+                            <img v-for="(img, idx) in form.stamps" :key="idx" :src="img" class="img-stamp" alt="印章">
+                        </template>
+                        <div v-else class="css-stamp">
+                            傑昇冷凍<br>空調技師<br>事務所印
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    createApp({
+        setup() {
+            const defaultData = {
+                quoteNo: 'Q1141212001',
+                date: '114.12.09',
+                clientName: '中興電工機械股份有限公司',
+                recipient: '廖宗榮先生',
+                clientPhone: '03-3284170 #',
+                projectName: '海科館淨零轉型工程',
+                location: '基隆市中正區北寧路367號',
+                stamps: [], 
+                items:[
+                    { id: 'A', name: '冰水機會測技術服務\n含測試報告簽證', unit: '式', qty: 1, price: 100000 },
+                    { id: 'B', name: 'TAB(測試調整平衡)技術服務', unit: '式', qty: 1, price: 1419000 },
+                    { id: 'C', name: 'Cx(性能確效)技術服務', unit: '式', qty: 1, price: 763000 }
+                ],
+                notes: `1. 報價有效期為報價日起一周內。\n2. 付款方式：依進度請款。`
+            };
+
+            const form = ref(JSON.parse(JSON.stringify(defaultData)));
+            const historyList = ref([]);
+            const dbList = ref([]); 
+
+            // --- 基本邏輯區 (金額計算、圖片處理) ---
+            const totalAmount = computed(() => form.value.items.reduce((sum, item) => sum + (item.qty * item.price), 0));
+            const chineseTotal = computed(() => {
+                const n = totalAmount.value;
+                const units =['', '拾', '佰', '仟', '萬', '拾', '佰', '仟', '億'];
+                const nums =['零', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖'];
+                let s = '';
+                let str = Math.floor(n).toString();
+                for (let i = 0; i < str.length; i++) {
+                    let num = parseInt(str[i]);
+                    let pos = str.length - 1 - i;
+                    if (num !== 0) s += nums[num] + units[pos];
+                    else if (pos === 4) s += '萬';
+                    else if (s[s.length-1] !== '零' && pos !== 0) s += '零';
+                }
+                return `新台幣${s.replace(/零+$/, '').replace(/零萬/, '萬').replace(/^萬/, '')}元整`;
+            });
+
+            const handleFileUpload = (event) => {
+                const files = event.target.files;
+                if (!files.length) return;
+                for (let i = 0; i < files.length; i++) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => form.value.stamps.push(e.target.result);
+                    reader.readAsDataURL(files[i]);
+                }
+                event.target.value = '';
+            };
+            const removeStamp = (index) => form.value.stamps.splice(index, 1);
+            const addItem = () => form.value.items.push({ id: '', name: '', unit: '式', qty: 1, price: 0 });
+            const removeItem = (idx) => form.value.items.splice(idx, 1);
+
+            // --- 網頁載入與快捷鍵 ---
+            onMounted(() => {
+                const saved = localStorage.getItem('quoteHistory_v6');
+                if (saved) historyList.value = JSON.parse(saved);
+                
+                fetchDbList();
+
+                // 監聽 Ctrl+S 快捷鍵
+                window.addEventListener('keydown', (e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                        e.preventDefault();
+                        saveLocalQuote();
+                    }
+                });
+            });
+
+            // --- 瀏覽器暫存 (LocalStorage) ---
+            const saveLocalQuote = () => {
+                const record = JSON.parse(JSON.stringify(form.value));
+                const idx = historyList.value.findIndex(h => h.quoteNo === record.quoteNo);
+                if (idx !== -1) historyList.value[idx] = record;
+                else historyList.value.unshift(record);
+                localStorage.setItem('quoteHistory_v6', JSON.stringify(historyList.value));
+                alert("已暫存至瀏覽器 (Ctrl+S)");
+            };
+            
+            const loadQuote = (index) => {
+                if (confirm('從暫存載入？')) form.value = JSON.parse(JSON.stringify(historyList.value[index]));
+            };
+            const clearHistory = () => {
+                if(!confirm('確定清空暫存？')) return;
+                historyList.value =[];
+                localStorage.removeItem('quoteHistory_v6');
+            };
+
+            // --- 瀏覽器資料庫互動區 (IndexedDB via localforage) ---
+
+            // 1. 取得列表
+            const fetchDbList = async () => {
+                try {
+                    const keys = await localforage.keys();
+                    const list =[];
+                    for (let key of keys) {
+                        if (key.startsWith('quote_')) {
+                            const item = await localforage.getItem(key);
+                            if (item) {
+                                list.push({
+                                    quoteNo: item.quoteNo,
+                                    clientName: item.clientName,
+                                    date: item.date
+                                });
+                            }
+                        }
+                    }
+                    // 依報價單號降冪排序
+                    list.sort((a, b) => b.quoteNo.localeCompare(a.quoteNo));
+                    dbList.value = list;
+                } catch (e) {
+                    console.error("讀取資料庫失敗", e);
+                }
+            };
+
+            // 2. 存入資料庫 (新增或修改)
+            const saveToDatabase = async () => {
+                try {
+                    const record = JSON.parse(JSON.stringify(form.value));
+                    if(!record.quoteNo) return alert("請輸入報價單編號！");
+
+                    await localforage.setItem('quote_' + record.quoteNo, record);
+                    alert("資料已成功存入本機資料庫！");
+                    fetchDbList(); 
+                } catch (error) {
+                    alert('儲存失敗：' + error.message);
+                }
+            };
+
+            // 3. 從資料庫載入
+            const loadFromDb = async (quoteNo) => {
+                if(!confirm(`確定要從資料庫載入 ${quoteNo} 嗎？目前畫面資料將被覆蓋。`)) return;
+                try {
+                    const item = await localforage.getItem('quote_' + quoteNo);
+                    if(item) {
+                        form.value = item;
+                    } else {
+                        alert("找不到該筆資料");
+                    }
+                } catch(e) {
+                    alert("載入失敗");
+                }
+            };
+
+            // 4. 從資料庫刪除
+            const deleteFromDb = async (quoteNo) => {
+                if(!confirm(`確定要永久刪除 ${quoteNo} 嗎？此動作無法復原。`)) return;
+                try {
+                    await localforage.removeItem('quote_' + quoteNo);
+                    alert("刪除成功");
+                    fetchDbList(); 
+                } catch(e) {
+                    alert("刪除失敗");
+                }
+            };
+
+            // 5. 匯出全部資料庫 (備份用)
+            const exportAllDb = async () => {
+                try {
+                    const keys = await localforage.keys();
+                    const allData = {};
+                    for (let key of keys) {
+                        if (key.startsWith('quote_')) {
+                            allData[key] = await localforage.getItem(key);
+                        }
+                    }
+                    if(Object.keys(allData).length === 0) return alert("資料庫目前無資料可匯出");
+                    
+                    const dataStr = JSON.stringify(allData, null, 2);
+                    const blob = new Blob([dataStr], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `報價單資料庫備份_${new Date().toISOString().slice(0,10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    alert("匯出資料庫失敗");
+                }
+            };
+
+            // 6. 匯入全部資料庫 (還原用)
+            const importAllDb = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        const data = JSON.parse(evt.target.result);
+                        if (typeof data === 'object' && !Array.isArray(data)) {
+                            let count = 0;
+                            for (let key in data) {
+                                if (key.startsWith('quote_')) {
+                                    await localforage.setItem(key, data[key]);
+                                    count++;
+                                }
+                            }
+                            alert(`成功匯入 ${count} 筆資料至資料庫！`);
+                            fetchDbList();
+                        } else {
+                            alert("檔案格式不符，請選擇正確的資料庫備份檔。");
+                        }
+                    } catch(err) { 
+                        alert("檔案解析失敗。"); 
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = ''; 
+            };
+
+            // --- 單筆匯出匯入與列印 ---
+            const exportData = () => {
+                const currentData = JSON.parse(JSON.stringify(form.value));
+                const dataStr = JSON.stringify(currentData, null, 2);
+                
+                const blob = new Blob([dataStr], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                const fileName = `${form.value.quoteNo || '未命名'}_${form.value.clientName || ''}.json`;
+                a.download = fileName;
+                
+                a.click();
+                URL.revokeObjectURL(url); 
+            };
+
+            const importData = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const data = JSON.parse(evt.target.result);
+                        
+                        if (Array.isArray(data)) {
+                            historyList.value = data;
+                            alert("已匯入多筆歷史紀錄！");
+                        } else if (data && typeof data === 'object') {
+                            form.value = data;
+                            alert("報價單匯入成功！");
+                        }
+                    } catch(err) { 
+                        alert("檔案格式錯誤，請確認是否為正確的 JSON 報價單檔案。"); 
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = ''; 
+            };
+
+            const resetForm = () => {
+                if(confirm('重置表單？')) form.value = JSON.parse(JSON.stringify(defaultData));
+            };
+            const printQuote = () => {
+                alert("列印提示：請在列印設定勾選「頁首與頁尾」以顯示頁碼。");
+                window.print();
+            };
+
+            return {
+                form, historyList, dbList, totalAmount, chineseTotal,
+                handleFileUpload, removeStamp, addItem, removeItem,
+                saveLocalQuote, loadQuote, clearHistory, resetForm, printQuote,
+                exportData, importData,
+                saveToDatabase, fetchDbList, loadFromDb, deleteFromDb,
+                exportAllDb, importAllDb
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
