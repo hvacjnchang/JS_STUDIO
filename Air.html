@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>空氣線圖與冷力計算機 (Psychrometric Chart & HVAC Calculator)</title>
+    <!-- 引入 Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+    <style>
+        /* 列印與浮水印設定 */
+        @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            body { background-color: white !important; padding: 0 !important; }
+            .no-print { display: none !important; }
+            .print-full { width: 100% !important; max-width: 100% !important; }
+            .print-break-inside-avoid { break-inside: avoid; }
+            #plotly-chart { height: 600px !important; }
+            
+            #print-watermark {
+                display: flex !important;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                justify-content: center;
+                align-items: center;
+                z-index: 9999;
+                opacity: 0.15;
+                pointer-events: none;
+            }
+        }
+        
+        #print-watermark { display: none; }
+
+        /* 美化滾動條 */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* 美化顏色選擇器 */
+        input[type="color"] {
+            -webkit-appearance: none;
+            border: none;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch {
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 font-sans text-gray-800">
+
+    <div id="print-watermark">
+        <img src="LOGO.png" alt="Watermark Logo" class="max-w-[80%] max-h-[80%] object-contain">
+    </div>
+
+    <div id="app" class="max-w-[1400px] mx-auto relative z-10">
+        
+        <header class="sticky top-0 z-50 flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded shadow mb-6 no-print">
+            <div class="flex items-center gap-3">
+                <img src="LOGO.png" alt="Logo" class="h-10 md:h-12 w-auto object-contain">
+                <h1 class="text-2xl font-bold text-blue-700">空氣線圖與冷力計算機</h1>
+            </div>
+            
+            <div class="flex items-center gap-3 mt-4 md:mt-0 flex-wrap justify-center">
+                <div class="bg-gray-100 p-1 rounded inline-flex">
+                    <button @click="unit = 'SI'" :class="{'bg-white shadow text-blue-600': unit === 'SI'}" class="px-3 py-1 rounded text-sm font-bold">SI (公制)</button>
+                    <button @click="unit = 'IP'" :class="{'bg-white shadow text-blue-600': unit === 'IP'}" class="px-3 py-1 rounded text-sm font-bold">IP (英制)</button>
+                </div>
+                <button @click="recalculateAll" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded text-sm transition shadow">重新計算</button>
+                <button @click="showDetails = !showDetails" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm transition shadow">
+                    {{ showDetails ? '隱藏計算過程' : '顯示計算過程' }}
+                </button>
+                <button @click="exportData" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded text-sm transition">匯出設定</button>
+                <input type="file" ref="fileInput" @change="importData" accept=".json" class="hidden">
+                <button @click="$refs.fileInput.click()" class="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-sm transition">匯入設定</button>
+                <button @click="printPage" class="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded text-sm transition">列印/預覽</button>
+            </div>
+        </header>
+
+        <div class="flex flex-col lg:flex-row gap-6">
+            
+            <div class="lg:w-1/3 flex flex-col gap-5 no-print custom-scroll sticky top-[90px]" style="max-height: calc(100vh - 110px); overflow-y: auto; padding-right: 5px;">
+                
+                <!-- 1. 狀態點輸入區 -->
+                <div class="bg-white p-4 rounded shadow border-t-4 border-blue-500">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-lg font-bold">1. 空氣狀態點 (Points)</h2>
+                        <button @click="addPoint" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded shadow">+ 新增點</button>
+                    </div>
+
+                    <div v-for="(pt, index) in points" :key="pt.id" class="border p-2 rounded bg-gray-50 mb-2 relative">
+                        <div class="flex justify-between items-center mb-2 gap-2">
+                            <input type="color" v-model="pt.color" @input="drawChart" class="w-6 h-6 p-0 border-0 rounded cursor-pointer shrink-0" title="選擇點的顏色">
+                            <input v-model="pt.name" @change="drawChart" class="font-bold bg-transparent border-b border-gray-300 outline-none flex-1 focus:border-blue-500 text-sm" placeholder="點名稱">
+                            <button @click="removePoint(index)" class="text-red-500 text-xs font-bold hover:text-red-700 shrink-0">刪除</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                                <select v-model="pt.p1Type" @change="handlePointChange(pt)" class="w-full border p-1 rounded bg-white mb-1">
+                                    <option value="dbt">乾球溫度 (DBT)</option>
+                                    <option value="wbt">濕球溫度 (WBT)</option>
+                                    <option value="rh">相對濕度 (RH)</option>
+                                    <option value="w">濕度比 (w)</option>
+                                    <option value="h">焓值 (h)</option>
+                                </select>
+                                <input type="number" v-model.number="pt.p1Val" @change="handlePointChange(pt)" class="w-full border p-1 rounded">
+                            </div>
+                            <div>
+                                <select v-model="pt.p2Type" @change="handlePointChange(pt)" class="w-full border p-1 rounded bg-white mb-1">
+                                    <option value="dbt">乾球溫度 (DBT)</option>
+                                    <option value="wbt">濕球溫度 (WBT)</option>
+                                    <option value="rh">相對濕度 (RH)</option>
+                                    <option value="w">濕度比 (w)</option>
+                                    <option value="h">焓值 (h)</option>
+                                </select>
+                                <input type="number" v-model.number="pt.p2Val" @change="handlePointChange(pt)" class="w-full border p-1 rounded">
+                            </div>
+                        </div>
+                        <div class="mt-2 flex items-center gap-2 text-xs">
+                            <label class="text-gray-600 w-1/3">風量 (Flow):</label>
+                            <input type="number" v-model.number="pt.flow" class="w-2/3 border p-1 rounded">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. 自訂點對點連線區 -->
+                <div class="bg-white p-4 rounded shadow border-l-4 border-teal-500">
+                    <h2 class="text-base font-bold mb-3">2. 點對點連線 (Lines)</h2>
+                    <div class="flex items-center gap-2 text-xs mb-3">
+                        <select v-model="linePtA" class="w-full border p-1 rounded bg-gray-50">
+                            <option :value="null">-- 起點 --</option>
+                            <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                        </select>
+                        <span class="text-gray-400">至</span>
+                        <select v-model="linePtB" class="w-full border p-1 rounded bg-gray-50">
+                            <option :value="null">-- 終點 --</option>
+                            <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                        </select>
+                        <button @click="addCustomLine" class="px-3 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded shrink-0">連線</button>
+                    </div>
+                    <div class="space-y-2">
+                        <div v-for="(line, idx) in customLines" :key="line.id" class="flex flex-col bg-gray-50 border p-2 rounded text-xs">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-gray-600 font-bold truncate w-4/5">{{ getPointName(line.pA) }} ➔ {{ getPointName(line.pB) }}</span>
+                                <button @click="removeCustomLine(idx)" class="text-red-500 hover:text-red-700 w-1/5 text-right">✕</button>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="color" v-model="line.color" @input="drawChart" class="w-6 h-6 p-0 border-0 rounded cursor-pointer shrink-0" title="選擇線條顏色">
+                                <select v-model="line.dash" @change="drawChart" class="w-full border p-1 rounded bg-white">
+                                    <option value="solid">實線 (Solid)</option>
+                                    <option value="dash">虛線 (Dash)</option>
+                                    <option value="dot">點線 (Dot)</option>
+                                    <option value="dashdot">點虛線 (Dash-Dot)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 室內熱負荷計算區 -->
+                <div class="bg-white p-4 rounded shadow border-l-4 border-orange-500">
+                    <h2 class="text-base font-bold mb-3">3. 室內負荷與狀態計算 (Room Load)</h2>
+                    <div class="grid grid-cols-2 gap-3 text-xs mb-3">
+                        <div class="col-span-2 flex gap-2">
+                            <div class="w-1/2">
+                                <label class="block text-gray-600 mb-1">起始點 (例如: 送風)</label>
+                                <select v-model="roomStartPt" class="w-full border p-1 rounded bg-gray-50">
+                                    <option :value="null">-- 選擇 --</option>
+                                    <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                                </select>
+                            </div>
+                            <div class="w-1/4">
+                                <label class="block text-gray-600 mb-1">風量</label>
+                                <input type="number" v-model.number="roomFlow" class="w-full border p-1 rounded">
+                            </div>
+                            <div class="w-1/4">
+                                <label class="block text-gray-600 mb-1">單位</label>
+                                <select v-model="roomFlowUnit" class="w-full border p-1 rounded bg-gray-50">
+                                    <option value="CMH">CMH</option>
+                                    <option value="CMM">CMM</option>
+                                    <option value="CFM">CFM</option>
+                                    <option value="LPS">L/s</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">室內顯熱 RSH ({{ unit === 'SI' ? 'kW' : 'Btu/h' }})</label>
+                            <input type="number" v-model.number="rsh" class="w-full border p-1 rounded">
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">室內潛熱 RLH ({{ unit === 'SI' ? 'kW' : 'Btu/h' }})</label>
+                            <input type="number" v-model.number="rlh" class="w-full border p-1 rounded">
+                        </div>
+                    </div>
+                    <button @click="createRoomPoint" class="w-full py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs rounded shadow transition font-bold">
+                        計算並標示室內狀態點
+                    </button>
+                </div>
+
+                <!-- 4. 混合點計算區 -->
+                <div class="bg-white p-4 rounded shadow border-l-4 border-purple-500">
+                    <h2 class="text-base font-bold mb-3">4. 混合點計算 (Air Mixing)</h2>
+                    <div class="grid grid-cols-2 gap-3 text-xs mb-3">
+                        <div>
+                            <label class="block text-gray-600 mb-1">來源 A</label>
+                            <select v-model="mixPtA" class="w-full border p-1 rounded bg-gray-50">
+                                <option :value="null">-- 選擇 --</option>
+                                <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">來源 B</label>
+                            <select v-model="mixPtB" class="w-full border p-1 rounded bg-gray-50">
+                                <option :value="null">-- 選擇 --</option>
+                                <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button @click="createMixPoint" class="w-full py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded shadow transition">
+                        混合計算並自動連線
+                    </button>
+                </div>
+
+                <!-- 5. 盤管冷力計算區 -->
+                <div class="bg-white p-4 rounded shadow border-l-4 border-indigo-500">
+                    <h2 class="text-base font-bold mb-3">5. 盤管冷卻能力 (Cooling Capacity)</h2>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                            <label class="block text-gray-600 mb-1">盤管前起點</label>
+                            <select v-model="calcPtA" class="w-full border p-1 rounded bg-gray-50">
+                                <option :value="null">-- 選擇 --</option>
+                                <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">盤管後終點</label>
+                            <select v-model="calcPtB" class="w-full border p-1 rounded bg-gray-50">
+                                <option :value="null">-- 選擇 --</option>
+                                <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">處理風量</label>
+                            <input type="number" v-model.number="calcFlow" class="w-full border p-1 rounded">
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">風量單位</label>
+                            <select v-model="calcFlowUnit" class="w-full border p-1 rounded bg-gray-50">
+                                <option value="CMH">CMH</option>
+                                <option value="CMM">CMM</option>
+                                <option value="CFM">CFM</option>
+                                <option value="LPS">L/s</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div v-if="coolingCapacity" class="mt-3 p-2 bg-indigo-50 border border-indigo-100 rounded text-center">
+                        <div class="text-xl font-bold text-indigo-700">{{ coolingCapacity.kW.toFixed(2) }} <span class="text-sm font-normal">kW</span></div>
+                        <div class="text-base font-bold text-indigo-600">{{ coolingCapacity.RT.toFixed(2) }} <span class="text-sm font-normal">RT (冷噸)</span></div>
+                    </div>
+                </div>
+
+                <!-- 6. 恆溫恆濕計算區 -->
+                <div class="bg-white p-4 rounded shadow border-l-4 border-pink-500">
+                    <h2 class="text-base font-bold mb-3">6. 恆溫恆濕計算 (Constant T&H)</h2>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                            <label class="block text-gray-600 mb-1">起始點 (目前狀態)</label>
+                            <select v-model="thPtA" class="w-full border p-1 rounded bg-gray-50">
+                                <option :value="null">-- 選擇 --</option>
+                                <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">目標點 (設定狀態)</label>
+                            <select v-model="thPtB" class="w-full border p-1 rounded bg-gray-50">
+                                <option :value="null">-- 選擇 --</option>
+                                <option v-for="pt in points" :value="pt.id">{{ pt.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">處理風量</label>
+                            <input type="number" v-model.number="thFlow" class="w-full border p-1 rounded">
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">風量單位</label>
+                            <select v-model="thFlowUnit" class="w-full border p-1 rounded bg-gray-50">
+                                <option value="CMH">CMH</option>
+                                <option value="CMM">CMM</option>
+                                <option value="CFM">CFM</option>
+                                <option value="LPS">L/s</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-3 text-xs mt-3">
+                        <div>
+                            <label class="block text-gray-600 mb-1">加濕方式</label>
+                            <select v-model="thHumType" class="w-full border p-1 rounded bg-gray-50">
+                                <option value="mist">水霧加濕 (超音波/高壓微霧)</option>
+                                <option value="steam">蒸汽加濕 (電熱/電極)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-600 mb-1">加濕供水溫度 (°C)</label>
+                            <input type="number" v-model.number="thWaterTemp" class="w-full border p-1 rounded">
+                        </div>
+                    </div>
+
+                    <button @click="calculateTH" class="w-full mt-3 py-1.5 bg-pink-500 hover:bg-pink-600 text-white text-xs rounded shadow transition font-bold">
+                        計算恆溫恆濕需求
+                    </button>
+                    
+                    <!-- 左側面板的恆溫恆濕詳細結果 -->
+                    <div v-if="thResult" class="mt-3 p-2 bg-pink-50 border border-pink-100 rounded text-xs grid grid-cols-1 gap-2">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <div class="text-gray-500">盤管加熱量 (純溫差)</div>
+                                <div class="text-sm font-bold text-red-600">{{ thResult[unit].sensibleHeating }} <span class="font-normal">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></div>
+                            </div>
+                            <div>
+                                <div class="text-gray-500">盤管冷卻量 (純溫差)</div>
+                                <div class="text-sm font-bold text-blue-600">{{ thResult[unit].sensibleCooling }} <span class="font-normal">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></div>
+                            </div>
+                        </div>
+                        
+                        <div v-if="thHumType === 'mist' && Number(thResult.SI.humid) > 0" class="border-t border-pink-200 pt-2">
+                            <div class="text-gray-500">水滴蒸發吸收熱量 (需由盤管補償)</div>
+                            <div class="text-sm font-bold text-orange-500">{{ thResult[unit].evapAbsorb }} <span class="font-normal">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></div>
+                        </div>
+
+                        <div class="border-t border-pink-200 pt-2 grid grid-cols-2 gap-2">
+                            <div>
+                                <div class="text-gray-500">加濕量</div>
+                                <div class="text-sm font-bold text-blue-400">{{ thResult[unit].humid }} <span class="font-normal">{{ unit === 'SI' ? 'kg/h' : 'lb/h' }}</span></div>
+                                <div v-if="Number(thResult.SI.humid) > 0" class="text-[10px] text-gray-500 mt-1">帶入熱量: {{ thResult[unit].humidHeatAdd }} {{ unit === 'SI' ? 'kW' : 'Btu/h' }}</div>
+                            </div>
+                            <div>
+                                <div class="text-gray-500">除濕量</div>
+                                <div class="text-sm font-bold text-teal-600">{{ thResult[unit].dehumid }} <span class="font-normal">{{ unit === 'SI' ? 'kg/h' : 'lb/h' }}</span></div>
+                                <div v-if="Number(thResult.SI.dehumid) > 0" class="text-[10px] text-gray-500 mt-1">凝結潛熱: {{ thResult[unit].dehumidLatent }} {{ unit === 'SI' ? 'kW' : 'Btu/h' }}<br>凝結水帶走: {{ thResult[unit].dehumidHeatRemove }} {{ unit === 'SI' ? 'kW' : 'Btu/h' }}</div>
+                            </div>
+                        </div>
+
+                        <div v-if="thHumType === 'steam' && Number(thResult.SI.humid) > 0" class="border-t border-pink-200 pt-2">
+                            <div class="text-gray-500">加濕器熱負荷 (電熱耗能)</div>
+                            <div class="text-sm font-bold text-orange-600">{{ thResult[unit].humPower }} <span class="font-normal">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 右側繪圖與資料表 -->
+            <div class="lg:w-2/3 print-full space-y-6 relative z-10">
+                
+                <div class="hidden print:flex flex-col md:flex-row items-center justify-center w-full gap-4 pb-4 border-b-2 border-gray-200">
+                    <img src="LOGO.png" alt="Logo" class="h-16 w-auto object-contain">
+                    <h1 class="text-3xl font-bold text-blue-700 tracking-wide">空氣線圖與冷力計算機</h1>
+                </div>
+
+                <!-- 空氣線圖 -->
+                <div class="bg-white p-4 rounded shadow print-break-inside-avoid">
+                    <div class="flex flex-col md:flex-row justify-between items-center mb-2 bg-gray-50 p-2 rounded border no-print">
+                        <div class="text-sm font-bold text-gray-700">自訂圖表座標軸：</div>
+                        <div class="flex items-center gap-2 text-sm mt-2 md:mt-0 flex-wrap">
+                            <label class="font-bold text-blue-600">X 軸:</label>
+                            <select v-model="xAxis" @change="drawChart" class="border rounded p-1 outline-none">
+                                <option value="dbt">乾球溫度 (DBT)</option>
+                                <option value="wbt">濕球溫度 (WBT)</option>
+                                <option value="rh">相對濕度 (RH)</option>
+                                <option value="w">濕度比 (w)</option>
+                                <option value="h">焓值 (h)</option>
+                                <option value="v">比容 (v)</option>
+                            </select>
+                            <label class="font-bold text-blue-600 ml-3">Y 軸:</label>
+                            <select v-model="yAxis" @change="drawChart" class="border rounded p-1 outline-none">
+                                <option value="dbt">乾球溫度 (DBT)</option>
+                                <option value="rh">相對濕度 (RH)</option>
+                                <option value="w">濕度比 (w)</option>
+                                <option value="h">焓值 (h)</option>
+                                <option value="v">比容 (v)</option>
+                            </select>
+                            <label class="font-bold text-blue-600 ml-3">標籤位置:</label>
+                            <select v-model="legendPosition" @change="drawChart" class="border rounded p-1 outline-none">
+                                <option value="bottom">下側 (Bottom)</option>
+                                <option value="left">左側 (Left)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="plotly-chart" class="w-full h-[500px] md:h-[650px]"></div>
+                </div>
+
+                <!-- 詳細資料表 -->
+                <div class="bg-white p-4 rounded shadow print-break-inside-avoid overflow-x-auto">
+                    <h3 class="text-lg font-bold mb-3">狀態點詳細資料 (Data Table)</h3>
+                    <table class="w-full text-sm text-left border relative z-10">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-100">
+                            <tr>
+                                <th class="px-2 py-2 border">點名稱</th>
+                                <th class="px-2 py-2 border">風量</th>
+                                <th class="px-2 py-2 border">DBT ({{ unit === 'SI' ? '°C' : '°F' }})</th>
+                                <th class="px-2 py-2 border">WBT ({{ unit === 'SI' ? '°C' : '°F' }})</th>
+                                <th class="px-2 py-2 border">RH (%)</th>
+                                <th class="px-2 py-2 border">w ({{ unit === 'SI' ? 'g/kg' : 'gr/lb' }})</th>
+                                <th class="px-2 py-2 border">h ({{ unit === 'SI' ? 'kJ/kg' : 'Btu/lb' }})</th>
+                                <th class="px-2 py-2 border">v ({{ unit === 'SI' ? 'm³/kg' : 'ft³/lb' }})</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="pt in points" :key="pt.id" class="border-b hover:bg-gray-50">
+                                <td class="px-2 py-2 border font-bold flex items-center gap-2">
+                                    <span class="w-3 h-3 rounded-full inline-block" :style="{ backgroundColor: pt.color }"></span>
+                                    {{ pt.name }}
+                                </td>
+                                <td class="px-2 py-2 border text-blue-600 font-bold">{{ pt.flow }}</td>
+                                <td class="px-2 py-2 border">{{ pt.state[unit].dbt.toFixed(1) }}</td>
+                                <td class="px-2 py-2 border">{{ pt.state[unit].wbt.toFixed(1) }}</td>
+                                <td class="px-2 py-2 border">{{ pt.state[unit].rh.toFixed(1) }}</td>
+                                <td class="px-2 py-2 border">{{ pt.state[unit].w.toFixed(2) }}</td>
+                                <td class="px-2 py-2 border">{{ pt.state[unit].h.toFixed(1) }}</td>
+                                <td class="px-2 py-2 border">{{ pt.state[unit].v.toFixed(3) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div class="mt-4 flex flex-col gap-3">
+                        <!-- 室內負荷資訊 -->
+                        <div class="p-3 bg-orange-50 border border-orange-200 rounded flex flex-wrap gap-8 items-center">
+                            <div>
+                                <span class="text-gray-700 font-bold">室內顯熱 RSH:</span>
+                                <span class="text-orange-600 font-bold ml-2 text-lg">{{ rsh }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-700 font-bold">室內潛熱 RLH:</span>
+                                <span class="text-orange-600 font-bold ml-2 text-lg">{{ rlh }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></span>
+                            </div>
+                        </div>
+                        
+                        <!-- 盤管冷卻能力資訊 -->
+                        <div class="p-3 bg-indigo-50 border border-indigo-200 rounded flex flex-wrap gap-8 items-center">
+                            <div>
+                                <span class="text-gray-700 font-bold">盤管處理風量:</span>
+                                <span class="text-indigo-600 font-bold ml-2 text-lg">{{ calcFlow }} <span class="text-sm text-gray-600">{{ calcFlowUnit }}</span></span>
+                            </div>
+                            <div v-if="coolingCapacity">
+                                <span class="text-gray-700 font-bold">盤管冷卻能力:</span>
+                                <span class="text-indigo-600 font-bold ml-2 text-lg">{{ coolingCapacity.kW.toFixed(2) }} <span class="text-sm text-gray-600">kW</span></span>
+                                <span class="text-indigo-600 font-bold ml-2 text-lg">/ {{ coolingCapacity.RT.toFixed(2) }} <span class="text-sm text-gray-600">RT (冷噸)</span></span>
+                            </div>
+                            <div v-else>
+                                <span class="text-gray-700 font-bold">盤管冷卻能力:</span>
+                                <span class="text-gray-500 ml-2 text-sm">尚未計算 (請選擇盤管前後狀態點)</span>
+                            </div>
+                        </div>
+
+                        <!-- 恆溫恆濕需求資訊 (總覽與列印區) -->
+                        <div class="p-3 bg-pink-50 border border-pink-200 rounded flex flex-col gap-3">
+                            <div class="w-full text-pink-800 font-bold border-b border-pink-200 pb-1">恆溫恆濕需求 (Constant T&H)</div>
+                            <template v-if="thResult">
+                                <div class="flex flex-wrap gap-x-6 gap-y-2 items-center">
+                                    <div>
+                                        <span class="text-gray-700 font-bold">處理風量:</span>
+                                        <span class="text-pink-600 font-bold ml-1 text-lg">{{ thFlow }} <span class="text-sm text-gray-600">{{ thFlowUnit }}</span></span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-700 font-bold">盤管加熱量 (純溫差):</span>
+                                        <span class="text-red-600 font-bold ml-1 text-lg">{{ thResult[unit].sensibleHeating }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-700 font-bold">盤管冷卻量 (純溫差):</span>
+                                        <span class="text-blue-600 font-bold ml-1 text-lg">{{ thResult[unit].sensibleCooling }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></span>
+                                    </div>
+                                    <div v-if="thHumType === 'mist' && Number(thResult.SI.humid) > 0">
+                                        <span class="text-gray-700 font-bold">水滴蒸發吸收熱量:</span>
+                                        <span class="text-orange-500 font-bold ml-1 text-lg">{{ thResult[unit].evapAbsorb }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></span>
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap gap-x-6 gap-y-2 items-center">
+                                    <div>
+                                        <span class="text-gray-700 font-bold">加濕量:</span>
+                                        <span class="text-blue-400 font-bold ml-1 text-lg">{{ thResult[unit].humid }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kg/h' : 'lb/h' }}</span></span>
+                                        <span v-if="Number(thResult.SI.humid) > 0" class="text-sm text-gray-500 ml-1">(帶入熱量: {{ thResult[unit].humidHeatAdd }} {{ unit === 'SI' ? 'kW' : 'Btu/h' }})</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-700 font-bold">除濕量:</span>
+                                        <span class="text-teal-600 font-bold ml-1 text-lg">{{ thResult[unit].dehumid }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kg/h' : 'lb/h' }}</span></span>
+                                        <span v-if="Number(thResult.SI.dehumid) > 0" class="text-sm text-gray-500 ml-1">(凝結潛熱: {{ thResult[unit].dehumidLatent }} {{ unit === 'SI' ? 'kW' : 'Btu/h' }}, 凝結水帶走: {{ thResult[unit].dehumidHeatRemove }} {{ unit === 'SI' ? 'kW' : 'Btu/h' }})</span>
+                                    </div>
+                                    <div v-if="thHumType === 'steam' && Number(thResult.SI.humid) > 0">
+                                        <span class="text-gray-700 font-bold">加濕器熱負荷 (電熱):</span>
+                                        <span class="text-orange-600 font-bold ml-1 text-lg">{{ thResult[unit].humPower }} <span class="text-sm text-gray-600">{{ unit === 'SI' ? 'kW' : 'Btu/h' }}</span></span>
+                                    </div>
+                                </div>
+                            </template>
+                            <div v-else>
+                                <span class="text-gray-500 text-sm">尚未計算 (請於左側選擇點位並點擊計算)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- 附錄：計算公式與過程 (螢幕可切換，列印強制顯示) -->
+        <div :class="showDetails ? 'block' : 'hidden'" class="print:!block mt-8 bg-white p-6 rounded shadow print-break-inside-avoid border-t-4 border-gray-800 w-full">
+            <h2 class="text-xl font-bold mb-4 border-b pb-2">附錄：計算公式與過程 (Calculation Details)</h2>
+            
+            <!-- 1. 基礎熱力學公式 -->
+            <div class="mb-6">
+                <h3 class="font-bold text-gray-800 mb-2">1. 基礎熱力學公式</h3>
+                <ul class="list-disc pl-5 text-sm text-gray-600 space-y-1">
+                    <li>飽和蒸氣壓 P<sub>ws</sub> = 0.61078 × exp(17.27 × T / (T + 237.3)) kPa</li>
+                    <li>濕度比 W = 0.621945 × P<sub>w</sub> / (P<sub>atm</sub> - P<sub>w</sub>) kg/kg</li>
+                    <li>焓值 h = 1.006 × T + W × (2501 + 1.86 × T) kJ/kg</li>
+                    <li>比容 v = 0.287042 × (T + 273.15) / (P<sub>atm</sub> - P<sub>w</sub>) m³/kg</li>
+                </ul>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- 2. 室內負荷計算 -->
+                <div v-if="printDetails.room" class="bg-gray-50 p-4 rounded border">
+                    <h3 class="font-bold text-gray-800 mb-2">2. 室內負荷計算</h3>
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <p><span class="font-semibold">質量流率 (m)</span> = 風量 / 比容<br>
+                           = {{ printDetails.room.flow_m3s.toFixed(4) }} / {{ printDetails.room.v.toFixed(4) }} = <span class="text-blue-600 font-bold">{{ printDetails.room.m.toFixed(4) }} kg/s</span></p>
+                        <p><span class="font-semibold">焓差 (Δh)</span> = (RSH + RLH) / m<br>
+                           = ({{ printDetails.room.rsh_kW.toFixed(2) }} + {{ printDetails.room.rlh_kW.toFixed(2) }}) / {{ printDetails.room.m.toFixed(4) }} = <span class="text-blue-600 font-bold">{{ printDetails.room.dh.toFixed(2) }} kJ/kg</span></p>
+                        <p><span class="font-semibold">濕度比差 (ΔW)</span> = RLH / (m × 2501)<br>
+                           = {{ printDetails.room.rlh_kW.toFixed(2) }} / ({{ printDetails.room.m.toFixed(4) }} × 2501) = <span class="text-blue-600 font-bold">{{ printDetails.room.dw.toFixed(5) }} kg/kg</span></p>
+                    </div>
+                </div>
+
+                <!-- 3. 混合點計算 -->
+                <div v-if="printDetails.mix" class="bg-gray-50 p-4 rounded border">
+                    <h3 class="font-bold text-gray-800 mb-2">3. 混合點計算</h3>
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <p><span class="font-semibold">質量比例 A (m<sub>A</sub>)</span> = {{ printDetails.mix.flowA }} / {{ printDetails.mix.vA.toFixed(4) }} = {{ printDetails.mix.mA.toFixed(2) }}</p>
+                        <p><span class="font-semibold">質量比例 B (m<sub>B</sub>)</span> = {{ printDetails.mix.flowB }} / {{ printDetails.mix.vB.toFixed(4) }} = {{ printDetails.mix.mB.toFixed(2) }}</p>
+                        <p><span class="font-semibold">混合焓值 (h<sub>mix</sub>)</span> = (m<sub>A</sub>h<sub>A</sub> + m<sub>B</sub>h<sub>B</sub>) / (m<sub>A</sub> + m<sub>B</sub>)<br>
+                           = ({{ printDetails.mix.mA.toFixed(2) }} × {{ printDetails.mix.hA.toFixed(2) }} + {{ printDetails.mix.mB.toFixed(2) }} × {{ printDetails.mix.hB.toFixed(2) }}) / {{ (printDetails.mix.mA + printDetails.mix.mB).toFixed(2) }} = <span class="text-blue-600 font-bold">{{ printDetails.mix.hMix.toFixed(2) }} kJ/kg</span></p>
+                        <p><span class="font-semibold">混合濕度比 (W<sub>mix</sub>)</span> = (m<sub>A</sub>W<sub>A</sub> + m<sub>B</sub>W<sub>B</sub>) / (m<sub>A</sub> + m<sub>B</sub>)<br>
+                           = <span class="text-blue-600 font-bold">{{ printDetails.mix.wMix.toFixed(2) }} g/kg</span></p>
+                    </div>
+                </div>
+
+                <!-- 4. 盤管冷卻能力 -->
+                <div v-if="printDetails.coil" class="bg-gray-50 p-4 rounded border">
+                    <h3 class="font-bold text-gray-800 mb-2">4. 盤管冷卻能力</h3>
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <p><span class="font-semibold">質量流率 (m)</span> = 風量 / 比容<br>
+                           = {{ printDetails.coil.flow_m3s.toFixed(4) }} / {{ printDetails.coil.v.toFixed(4) }} = <span class="text-blue-600 font-bold">{{ printDetails.coil.m.toFixed(4) }} kg/s</span></p>
+                        <p><span class="font-semibold">冷卻能力 (Q)</span> = m × |h<sub>A</sub> - h<sub>B</sub>|<br>
+                           = {{ printDetails.coil.m.toFixed(4) }} × |{{ printDetails.coil.hA.toFixed(2) }} - {{ printDetails.coil.hB.toFixed(2) }}| = <span class="text-blue-600 font-bold">{{ printDetails.coil.q.toFixed(2) }} kW</span></p>
+                    </div>
+                </div>
+
+                <!-- 5. 恆溫恆濕計算 -->
+                <div v-if="printDetails.th" class="bg-gray-50 p-4 rounded border">
+                    <h3 class="font-bold text-gray-800 mb-2">5. 恆溫恆濕計算</h3>
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <p><span class="font-semibold">質量流率 (m)</span> = {{ printDetails.th.flow_m3s.toFixed(4) }} / {{ printDetails.th.v.toFixed(4) }} = <span class="text-blue-600 font-bold">{{ printDetails.th.m.toFixed(4) }} kg/s</span></p>
+                        <p><span class="font-semibold">純溫差顯熱 (Q<sub>sensible</sub>)</span> = m × (1.006 + 1.86 × W<sub>A</sub>) × |T<sub>B</sub> - T<sub>A</sub>|<br>
+                           = {{ printDetails.th.m.toFixed(4) }} × (1.006 + 1.86 × {{ printDetails.th.wA.toFixed(5) }}) × |{{ printDetails.th.tB.toFixed(2) }} - {{ printDetails.th.tA.toFixed(2) }}| = <span class="text-blue-600 font-bold">{{ printDetails.th.q_sensible.toFixed(2) }} kW</span></p>
+                        
+                        <div v-if="printDetails.th.wB > printDetails.th.wA" class="mt-2 pt-2 border-t border-gray-200">
+                            <p><span class="font-semibold">加濕水量 (m<sub>w</sub>)</span> = m × (W<sub>B</sub> - W<sub>A</sub>) × 3600<br>
+                               = {{ printDetails.th.m.toFixed(4) }} × ({{ printDetails.th.wB.toFixed(5) }} - {{ printDetails.th.wA.toFixed(5) }}) × 3600 = <span class="text-blue-600 font-bold">{{ printDetails.th.mw.toFixed(2) }} kg/h</span></p>
+                            <p><span class="font-semibold">供水焓值 (h<sub>water</sub>)</span> = 4.186 × {{ printDetails.th.waterTemp }}°C = {{ printDetails.th.h_water.toFixed(2) }} kJ/kg</p>
+                            
+                            <div v-if="printDetails.th.humType === 'mist'">
+                                <p><span class="font-semibold">水滴蒸發吸收熱量 (Q<sub>evap</sub>)</span> = (m<sub>w</sub> / 3600) × (2501 + 1.86 × T<sub>B</sub> - h<sub>water</sub>)<br>
+                                   = ({{ printDetails.th.mw.toFixed(2) }} / 3600) × (2501 + 1.86 × {{ printDetails.th.tB.toFixed(2) }} - {{ printDetails.th.h_water.toFixed(2) }}) = <span class="text-orange-500 font-bold">{{ printDetails.th.q_evap.toFixed(2) }} kW</span></p>
+                            </div>
+                            <div v-else>
+                                <p><span class="font-semibold">蒸汽焓值 (h<sub>steam</sub>)</span> = 2676 kJ/kg</p>
+                                <p><span class="font-semibold">加濕器熱負荷 (P<sub>hum</sub>)</span> = (m<sub>w</sub> / 3600) × (h<sub>steam</sub> - h<sub>water</sub>)<br>
+                                   = ({{ printDetails.th.mw.toFixed(2) }} / 3600) × (2676 - {{ printDetails.th.h_water.toFixed(2) }}) = <span class="text-orange-600 font-bold">{{ printDetails.th.p_hum.toFixed(2) }} kW</span></p>
+                            </div>
+                        </div>
+                        <div v-else-if="printDetails.th.wA > printDetails.th.wB" class="mt-2 pt-2 border-t border-gray-200">
+                            <p><span class="font-semibold">除濕水量 (m<sub>w</sub>)</span> = m × (W<sub>A</sub> - W<sub>B</sub>) × 3600<br>
+                               = {{ printDetails.th.m.toFixed(4) }} × ({{ printDetails.th.wA.toFixed(5) }} - {{ printDetails.th.wB.toFixed(5) }}) × 3600 = <span class="text-blue-600 font-bold">{{ printDetails.th.mw.toFixed(2) }} kg/h</span></p>
+                            <p><span class="font-semibold">凝結潛熱 (Q<sub>latent</sub>)</span> = (m<sub>w</sub> / 3600) × (2501 + 1.86 × T<sub>B</sub>)<br>
+                               = ({{ printDetails.th.mw.toFixed(2) }} / 3600) × (2501 + 1.86 × {{ printDetails.th.tB.toFixed(2) }}) = <span class="text-teal-600 font-bold">{{ printDetails.th.q_latent.toFixed(2) }} kW</span></p>
+                            <p><span class="font-semibold">凝結水帶走熱量 (Q<sub>cond</sub>)</span> = (m<sub>w</sub> / 3600) × (4.186 × 10°C) = <span class="text-teal-600 font-bold">{{ printDetails.th.q_cond.toFixed(2) }} kW</span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
+
+        const Patm = 101.325; // 標準大氣壓 (kPa)
+
+        // 飽和蒸氣壓公式
+        function getPws(T_C) {
+            return 0.61078 * Math.exp(17.27 * T_C / (T_C + 237.3));
+        }
+
+        // 核心運算
+        function computeState(dbt_val, p2_type, p2_val, inputUnit) {
+            let dbt_C = inputUnit === 'SI' ? dbt_val : (dbt_val - 32) / 1.8;
+            let w_kg_kg = 0;
+            let pws_dbt = getPws(dbt_C);
+
+            if (p2_type === 'rh') {
+                let pw = (p2_val / 100) * pws_dbt;
+                w_kg_kg = 0.621945 * pw / (Patm - pw);
+            } else if (p2_type === 'wbt') {
+                let wbt_C = inputUnit === 'SI' ? p2_val : (p2_val - 32) / 1.8;
+                let pws_wbt = getPws(wbt_C);
+                let w_wbt = 0.621945 * pws_wbt / (Patm - pws_wbt);
+                w_kg_kg = ((2501 - 2.326 * wbt_C) * w_wbt - 1.006 * (dbt_C - wbt_C)) / (2501 + 1.86 * dbt_C - 4.186 * wbt_C);
+            } else if (p2_type === 'w') {
+                w_kg_kg = inputUnit === 'SI' ? p2_val / 1000 : p2_val / 7000;
+            } else if (p2_type === 'h') {
+                if (inputUnit === 'SI') w_kg_kg = (p2_val - 1.006 * dbt_C) / (2501 + 1.86 * dbt_C);
+                else w_kg_kg = (p2_val - 0.24 * dbt_val) / (1061 + 0.444 * dbt_val);
+            }
+            w_kg_kg = Math.max(0, w_kg_kg);
+
+            let pw = w_kg_kg * Patm / (0.621945 + w_kg_kg);
+            let rh = Math.min(100, Math.max(0, (pw / pws_dbt) * 100));
+
+            let wbt_C = dbt_C;
+            if (w_kg_kg > 0) {
+                let low = -50, high = dbt_C;
+                for (let i = 0; i < 30; i++) {
+                    let mid = (low + high) / 2;
+                    let p_ws = getPws(mid);
+                    let w_s = 0.621945 * p_ws / (Patm - p_ws);
+                    let w_calc = ((2501 - 2.326 * mid) * w_s - 1.006 * (dbt_C - mid)) / (2501 + 1.86 * dbt_C - 4.186 * mid);
+                    if (w_calc > w_kg_kg) high = mid; else low = mid;
+                }
+                wbt_C = (low + high) / 2;
+            }
+
+            let v_SI = 0.287042 * (dbt_C + 273.15) / (Patm - pw);
+            let h_SI = 1.006 * dbt_C + w_kg_kg * (2501 + 1.86 * dbt_C);
+            let dbt_F = dbt_C * 1.8 + 32;
+            let wbt_F = wbt_C * 1.8 + 32;
+            let h_IP = 0.24 * dbt_F + w_kg_kg * (1061 + 0.444 * dbt_F);
+            let v_IP = v_SI * 16.018;
+
+            return {
+                SI: { dbt: dbt_C, wbt: wbt_C, rh: rh, w: w_kg_kg * 1000, h: h_SI, v: v_SI },
+                IP: { dbt: dbt_F, wbt: wbt_F, rh: rh, w: w_kg_kg * 7000, h: h_IP, v: v_IP }
+            };
+        }
+
+        // 解析器
+        function resolveState(t1, v1, t2, v2, unit) {
+            if (t1 === t2) return null;
+            if (t1 === 'dbt') return computeState(v1, t2, v2, unit);
+            if (t2 === 'dbt') return computeState(v2, t1, v1, unit);
+
+            if ((t1 === 'w' && t2 === 'h') || (t1 === 'h' && t2 === 'w')) {
+                let w_val = t1 === 'w' ? v1 : v2;
+                let h_val = t1 === 'h' ? v1 : v2;
+                let w_kg = unit === 'SI' ? w_val / 1000 : w_val / 7000;
+                let dbt_C = unit === 'SI' ? (h_val - 2501 * w_kg) / (1.006 + 1.86 * w_kg) : ((h_val - 1061 * w_kg) / (0.24 + 0.444 * w_kg) - 32) / 1.8;
+                let dbt_eval = unit === 'SI' ? dbt_C : dbt_C * 1.8 + 32;
+                return computeState(dbt_eval, 'w', w_val, unit);
+            }
+
+            if ((t1 === 'wbt' && t2 === 'rh') || (t1 === 'rh' && t2 === 'wbt')) {
+                let wbt = t1 === 'wbt' ? v1 : v2;
+                let rh = t1 === 'rh' ? v1 : v2;
+                let wbt_C = unit === 'SI' ? wbt : (wbt - 32)/1.8;
+                let low = wbt_C, high = 100;
+                for(let i=0; i<40; i++) {
+                    let mid = (low+high)/2;
+                    let dbt_test = unit === 'SI' ? mid : mid*1.8+32;
+                    let testState = computeState(dbt_test, 'wbt', wbt, unit);
+                    if (testState.SI.rh < rh) high = mid; else low = mid;
+                }
+                let dbt_final = unit === 'SI' ? (low+high)/2 : ((low+high)/2)*1.8+32;
+                return computeState(dbt_final, 'wbt', wbt, unit);
+            }
+            
+            alert("不支援此兩種特性的組合運算！");
+            return null;
+        }
+
+        function getAxisConfig(axisType, unit) {
+            switch(axisType) {
+                case 'dbt': return { title: `乾球溫度 DBT (${unit==='SI'?'°C':'°F'})`, range: unit==='SI'?[-10, 55]:[14, 131] };
+                case 'wbt': return { title: `濕球溫度 WBT (${unit==='SI'?'°C':'°F'})`, range: unit==='SI'?[-10, 40]:[14, 104] };
+                case 'rh':  return { title: `相對濕度 RH (%)`, range:[0, 105] };
+                case 'w':   return { title: `濕度比 w (${unit==='SI'?'g/kg':'gr/lb'})`, range: unit==='SI'?[0, 35]:[0, 200] };
+                case 'h':   return { title: `焓值 h (${unit==='SI'?'kJ/kg':'Btu/lb'})`, range: unit==='SI'?[-10, 125]:[0, 65] };
+                case 'v':   return { title: `比容 v (${unit==='SI'?'m³/kg':'ft³/lb'})`, range: unit==='SI'?[0.75, 0.95]:[12, 15] };
+            }
+        }
+
+        createApp({
+            setup() {
+                const unit = ref('SI');
+                const points = ref([]);
+                const showDetails = ref(false); // 控制計算過程顯示
+                
+                // 點對點自訂連線
+                const customLines = ref([]);
+                const linePtA = ref(null);
+                const linePtB = ref(null);
+                
+                // 室內負荷
+                const roomStartPt = ref(null);
+                const roomFlow = ref(1000);
+                const roomFlowUnit = ref('CMH');
+                const rsh = ref(0);
+                const rlh = ref(0);
+
+                // 混合點
+                const mixPtA = ref(null);
+                const mixPtB = ref(null);
+
+                // 冷力計算
+                const calcFlow = ref(3000);
+                const calcFlowUnit = ref('CMH');
+                const calcPtA = ref(null);
+                const calcPtB = ref(null);
+
+                // 恆溫恆濕計算
+                const thPtA = ref(null);
+                const thPtB = ref(null);
+                const thFlow = ref(1000);
+                const thFlowUnit = ref('CMH');
+                const thHumType = ref('mist'); // 預設水霧加濕
+                const thWaterTemp = ref(20);   // 預設水溫 20度
+                const thResult = ref(null);
+
+                // 圖表軸與標籤設定
+                const xAxis = ref('dbt');
+                const yAxis = ref('w');
+                const legendPosition = ref('bottom'); // 預設標籤在下側
+
+                const handlePointChange = (pt) => {
+                    if (pt.p1Type === pt.p2Type) return alert("請選擇兩種不同的特性做為輸入！");
+                    let newState = resolveState(pt.p1Type, pt.p1Val, pt.p2Type, pt.p2Val, unit.value);
+                    if (newState) {
+                        pt.state = newState;
+                        drawChart();
+                    }
+                };
+
+                // 計算恆溫恆濕需求 (包含水溫與加濕方式的熱力學計算)
+                const calculateTH = () => {
+                    if (!thPtA.value || !thPtB.value || !thFlow.value) {
+                        alert("請選擇起始點、目標點並輸入風量");
+                        return;
+                    }
+                    const pA = points.value.find(p => p.id === thPtA.value);
+                    const pB = points.value.find(p => p.id === thPtB.value);
+                    if (!pA || !pB) return;
+
+                    let flow_m3s = 0;
+                    let flow = parseFloat(thFlow.value);
+                    if (thFlowUnit.value === 'CMH') flow_m3s = flow / 3600;
+                    else if (thFlowUnit.value === 'CMM') flow_m3s = flow / 60;
+                    else if (thFlowUnit.value === 'CFM') flow_m3s = flow * 0.000471947;
+                    else if (thFlowUnit.value === 'LPS') flow_m3s = flow / 1000;
+
+                    let massFlow = flow_m3s / pA.state.SI.v; // kg_da / s
+                    let tA = pA.state.SI.dbt;
+                    let wA = pA.state.SI.w / 1000;
+                    let tB = pB.state.SI.dbt;
+                    let wB = pB.state.SI.w / 1000;
+                    let delta_w = wB - wA; // kg_w / kg_da
+
+                    // 1. 純溫差顯熱 (Sensible Heat)
+                    let q_sensible = massFlow * (1.006 + 1.86 * wA) * (tB - tA);
+                    let sensible_heating = q_sensible > 0 ? q_sensible : 0;
+                    let sensible_cooling = q_sensible < 0 ? Math.abs(q_sensible) : 0;
+
+                    let humid_kgh = 0;
+                    let humid_heat_add = 0;
+                    let evap_absorb = 0;
+                    let hum_power = 0;
+
+                    let dehumid_kgh = 0;
+                    let dehumid_latent = 0;
+                    let dehumid_heat_remove = 0;
+
+                    if (delta_w > 0) {
+                        // 加濕狀態
+                        let m_w = massFlow * delta_w; // kg_w / s
+                        humid_kgh = m_w * 3600;
+                        let h_water_liquid = 4.186 * thWaterTemp.value; // 供水焓值 (kJ/kg_w)
+
+                        if (thHumType.value === 'steam') {
+                            // 蒸汽加濕 (電熱/電極)
+                            let h_steam = 2676; // 100°C 飽和蒸汽焓值 (kJ/kg_w)
+                            humid_heat_add = m_w * h_steam;
+                            hum_power = m_w * (h_steam - h_water_liquid); // 加濕器耗電量
+                            evap_absorb = 0;
+                        } else {
+                            // 水霧加濕 (超音波/高壓微霧/水洗)
+                            humid_heat_add = m_w * h_water_liquid;
+                            // 水滴蒸發吸收的熱量 = 將水從供水溫度變成 tB 溫度的水蒸氣所需的熱量
+                            evap_absorb = m_w * (2501 + 1.86 * tB - h_water_liquid);
+                            hum_power = 0;
+                        }
+                    } else if (delta_w < 0) {
+                        // 除濕狀態
+                        let m_w = massFlow * Math.abs(delta_w);
+                        dehumid_kgh = m_w * 3600;
+                        let h_condensate = 4.186 * 10; // 假設 10°C 凝結水離開系統
+                        dehumid_heat_remove = m_w * h_condensate;
+                        dehumid_latent = m_w * (2501 + 1.86 * tB); // 凝結潛熱
+                    }
+
+                    thResult.value = {
+                        SI: {
+                            sensibleHeating: sensible_heating.toFixed(2),
+                            sensibleCooling: sensible_cooling.toFixed(2),
+                            humid: humid_kgh.toFixed(2),
+                            humidHeatAdd: humid_heat_add.toFixed(2),
+                            evapAbsorb: evap_absorb.toFixed(2),
+                            dehumid: dehumid_kgh.toFixed(2),
+                            dehumidLatent: dehumid_latent.toFixed(2),
+                            dehumidHeatRemove: dehumid_heat_remove.toFixed(2),
+                            humPower: hum_power.toFixed(2)
+                        },
+                        IP: {
+                            sensibleHeating: (sensible_heating * 3412.142).toFixed(2),
+                            sensibleCooling: (sensible_cooling * 3412.142).toFixed(2),
+                            humid: (humid_kgh * 2.20462).toFixed(2),
+                            humidHeatAdd: (humid_heat_add * 3412.142).toFixed(2),
+                            evapAbsorb: (evap_absorb * 3412.142).toFixed(2),
+                            dehumid: (dehumid_kgh * 2.20462).toFixed(2),
+                            dehumidLatent: (dehumid_latent * 3412.142).toFixed(2),
+                            dehumidHeatRemove: (dehumid_heat_remove * 3412.142).toFixed(2),
+                            humPower: (hum_power * 3412.142).toFixed(2)
+                        }
+                    };
+                };
+
+                // 重新計算所有點與連線
+                const recalculateAll = () => {
+                    // 1. 重新計算基本點
+                    points.value.forEach(pt => {
+                        if (!pt.mixSource && !pt.name.includes('室內')) {
+                            let newState = resolveState(pt.p1Type, pt.p1Val, pt.p2Type, pt.p2Val, unit.value);
+                            if (newState) pt.state = newState;
+                        }
+                    });
+
+                    // 2. 重新計算混合點
+                    points.value.forEach(pt => {
+                        if (pt.mixSource) {
+                            const pA = points.value.find(p => p.id === pt.mixSource[0]);
+                            const pB = points.value.find(p => p.id === pt.mixSource[1]);
+                            if (pA && pB) {
+                                let mA = pA.flow / pA.state.SI.v;
+                                let mB = pB.flow / pB.state.SI.v;
+                                let mMix = mA + mB;
+                                if (mMix > 0) {
+                                    let wMix_SI = (mA * pA.state.SI.w + mB * pB.state.SI.w) / mMix;
+                                    let hMix_SI = (mA * pA.state.SI.h + mB * pB.state.SI.h) / mMix;
+                                    let newState = resolveState('w', wMix_SI, 'h', hMix_SI, 'SI');
+                                    if (newState) {
+                                        pt.state = newState;
+                                        pt.flow = Math.round(mMix * newState.SI.v);
+                                        pt.p1Val = Number(newState[unit.value].dbt.toFixed(2));
+                                        pt.p2Val = Number(newState[unit.value].w.toFixed(2));
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // 3. 重新計算室內點 (如果有建立的話)
+                    points.value.forEach(pt => {
+                        if (pt.name.includes('室內')) {
+                            if (roomStartPt.value) {
+                                const pStart = points.value.find(p => p.id === roomStartPt.value);
+                                if (pStart) {
+                                    let flow_m3s = 0;
+                                    let flow = parseFloat(roomFlow.value);
+                                    if (roomFlowUnit.value === 'CMH') flow_m3s = flow / 3600;
+                                    else if (roomFlowUnit.value === 'CMM') flow_m3s = flow / 60;
+                                    else if (roomFlowUnit.value === 'CFM') flow_m3s = flow * 0.000471947;
+                                    else if (roomFlowUnit.value === 'LPS') flow_m3s = flow / 1000;
+
+                                    let massFlow = flow_m3s / pStart.state.SI.v;
+                                    let rsh_kW = unit.value === 'SI' ? rsh.value : rsh.value / 3412.142;
+                                    let rlh_kW = unit.value === 'SI' ? rlh.value : rlh.value / 3412.142;
+
+                                    let delta_h = (rsh_kW + rlh_kW) / massFlow;
+                                    let delta_w_kg = rlh_kW / (massFlow * 2501);
+
+                                    let new_h_SI = pStart.state.SI.h + delta_h;
+                                    let new_w_SI = pStart.state.SI.w + (delta_w_kg * 1000);
+
+                                    let newState = resolveState('w', new_w_SI, 'h', new_h_SI, 'SI');
+                                    if (newState) {
+                                        pt.state = newState;
+                                        pt.flow = roomFlow.value;
+                                        pt.p1Val = Number(newState[unit.value].dbt.toFixed(2));
+                                        pt.p2Val = Number(newState[unit.value].w.toFixed(2));
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // 4. 重新計算恆溫恆濕
+                    if (thResult.value) {
+                        calculateTH();
+                    }
+
+                    drawChart();
+                };
+
+                // 產生列印/預覽用的詳細計算過程資料
+                const printDetails = computed(() => {
+                    let details = { room: null, mix: null, coil: null, th: null };
+
+                    const getFlowM3S = (flow, fUnit) => {
+                        if (fUnit === 'CMH') return flow / 3600;
+                        if (fUnit === 'CMM') return flow / 60;
+                        if (fUnit === 'CFM') return flow * 0.000471947;
+                        if (fUnit === 'LPS') return flow / 1000;
+                        return 0;
+                    };
+
+                    if (roomStartPt.value) {
+                        const p = points.value.find(x => x.id === roomStartPt.value);
+                        if (p) {
+                            let flow_m3s = getFlowM3S(roomFlow.value, roomFlowUnit.value);
+                            let m = flow_m3s / p.state.SI.v;
+                            let rsh_kW = unit.value === 'SI' ? rsh.value : rsh.value / 3412.142;
+                            let rlh_kW = unit.value === 'SI' ? rlh.value : rlh.value / 3412.142;
+                            details.room = {
+                                flow_m3s, v: p.state.SI.v, m, rsh_kW, rlh_kW,
+                                dh: (rsh_kW + rlh_kW)/m,
+                                dw: rlh_kW / (m * 2501)
+                            };
+                        }
+                    }
+
+                    if (mixPtA.value && mixPtB.value) {
+                        const pA = points.value.find(x => x.id === mixPtA.value);
+                        const pB = points.value.find(x => x.id === mixPtB.value);
+                        if (pA && pB) {
+                            let mA = pA.flow / pA.state.SI.v;
+                            let mB = pB.flow / pB.state.SI.v;
+                            details.mix = {
+                                flowA: pA.flow, vA: pA.state.SI.v, mA,
+                                flowB: pB.flow, vB: pB.state.SI.v, mB,
+                                wA: pA.state.SI.w, wB: pB.state.SI.w,
+                                hA: pA.state.SI.h, hB: pB.state.SI.h,
+                                wMix: (mA*pA.state.SI.w + mB*pB.state.SI.w)/(mA+mB),
+                                hMix: (mA*pA.state.SI.h + mB*pB.state.SI.h)/(mA+mB)
+                            };
+                        }
+                    }
+
+                    if (calcPtA.value && calcPtB.value && calcFlow.value) {
+                        const pA = points.value.find(x => x.id === calcPtA.value);
+                        const pB = points.value.find(x => x.id === calcPtB.value);
+                        if (pA && pB) {
+                            let flow_m3s = getFlowM3S(calcFlow.value, calcFlowUnit.value);
+                            let m = flow_m3s / pA.state.SI.v;
+                            details.coil = {
+                                flow_m3s, v: pA.state.SI.v, m,
+                                hA: pA.state.SI.h, hB: pB.state.SI.h,
+                                q: m * Math.abs(pA.state.SI.h - pB.state.SI.h)
+                            };
+                        }
+                    }
+
+                    if (thPtA.value && thPtB.value && thFlow.value && thResult.value) {
+                        const pA = points.value.find(x => x.id === thPtA.value);
+                        const pB = points.value.find(x => x.id === thPtB.value);
+                        if (pA && pB) {
+                            let flow_m3s = getFlowM3S(thFlow.value, thFlowUnit.value);
+                            let m = flow_m3s / pA.state.SI.v;
+                            let wA = pA.state.SI.w / 1000;
+                            let wB = pB.state.SI.w / 1000;
+                            let q_sensible = m * (1.006 + 1.86 * wA) * Math.abs(pB.state.SI.dbt - pA.state.SI.dbt);
+                            let mw = m * Math.abs(wB - wA) * 3600;
+                            let h_water = 4.186 * thWaterTemp.value;
+                            let q_evap = (mw / 3600) * (2501 + 1.86 * pB.state.SI.dbt - h_water);
+                            let p_hum = (mw / 3600) * (2676 - h_water);
+                            let q_latent = (mw / 3600) * (2501 + 1.86 * pB.state.SI.dbt);
+                            let q_cond = (mw / 3600) * (4.186 * 10);
+
+                            details.th = {
+                                flow_m3s, v: pA.state.SI.v, m,
+                                tA: pA.state.SI.dbt, tB: pB.state.SI.dbt,
+                                wA, wB,
+                                hA: pA.state.SI.h, hB: pB.state.SI.h,
+                                waterTemp: thWaterTemp.value,
+                                humType: thHumType.value,
+                                q_sensible, mw, h_water, q_evap, p_hum, q_latent, q_cond
+                            };
+                        }
+                    }
+
+                    return details;
+                });
+
+                watch(unit, (newU) => {
+                    points.value.forEach(pt => {
+                        pt.p1Val = Number((pt.state[newU][pt.p1Type]).toFixed(2));
+                        pt.p2Val = Number((pt.state[newU][pt.p2Type]).toFixed(2));
+                    });
+                    nextTick(() => drawChart());
+                });
+
+                const addPoint = () => {
+                    let dbt = unit.value === 'SI' ? 25 : 77;
+                    let pt = {
+                        id: Date.now(),
+                        name: `點 ${points.value.length + 1}`,
+                        color: '#ef4444', // 預設紅色
+                        flow: 1000,
+                        p1Type: 'dbt', p1Val: dbt,
+                        p2Type: 'rh', p2Val: 50,
+                        mixSource: null,
+                        state: resolveState('dbt', dbt, 'rh', 50, unit.value)
+                    };
+                    points.value.push(pt);
+                    drawChart();
+                };
+
+                const removePoint = (index) => {
+                    let ptId = points.value[index].id;
+                    points.value.splice(index, 1);
+                    customLines.value = customLines.value.filter(l => l.pA !== ptId && l.pB !== ptId);
+                    drawChart();
+                };
+
+                const getPointName = (id) => {
+                    let p = points.value.find(x => x.id === id);
+                    return p ? p.name : '未知';
+                };
+
+                const addCustomLine = () => {
+                    if (!linePtA.value || !linePtB.value) return alert("請選擇起點與終點");
+                    if (linePtA.value === linePtB.value) return alert("請選擇不同的兩點");
+                    customLines.value.push({ 
+                        id: Date.now(), 
+                        pA: linePtA.value, 
+                        pB: linePtB.value,
+                        color: '#0d9488', // 預設藍綠色
+                        dash: 'solid'     // 預設實線
+                    });
+                    drawChart();
+                };
+
+                const removeCustomLine = (idx) => {
+                    customLines.value.splice(idx, 1);
+                    drawChart();
+                };
+
+                const createRoomPoint = () => {
+                    if (!roomStartPt.value) return alert("請選擇起始點");
+                    if (roomFlow.value <= 0) return alert("風量必須大於0");
+
+                    const pStart = points.value.find(p => p.id === roomStartPt.value);
+                    
+                    let flow_m3s = 0;
+                    let flow = parseFloat(roomFlow.value);
+                    if (roomFlowUnit.value === 'CMH') flow_m3s = flow / 3600;
+                    else if (roomFlowUnit.value === 'CMM') flow_m3s = flow / 60;
+                    else if (roomFlowUnit.value === 'CFM') flow_m3s = flow * 0.000471947;
+                    else if (roomFlowUnit.value === 'LPS') flow_m3s = flow / 1000;
+
+                    let massFlow = flow_m3s / pStart.state.SI.v; 
+                    
+                    let rsh_kW = unit.value === 'SI' ? rsh.value : rsh.value / 3412.142;
+                    let rlh_kW = unit.value === 'SI' ? rlh.value : rlh.value / 3412.142;
+
+                    let delta_h = (rsh_kW + rlh_kW) / massFlow;
+                    let delta_w_kg = rlh_kW / (massFlow * 2501);
+                    
+                    let new_h_SI = pStart.state.SI.h + delta_h;
+                    let new_w_SI = pStart.state.SI.w + (delta_w_kg * 1000); 
+
+                    let newState = resolveState('w', new_w_SI, 'h', new_h_SI, 'SI');
+                    if(!newState) return alert("數值計算超出正常熱力學範圍");
+
+                    let newPtId = Date.now();
+                    let pt = {
+                        id: newPtId,
+                        name: `室內 (${pStart.name} 加載)`,
+                        color: '#f59e0b', // 預設橘色
+                        flow: roomFlow.value,
+                        p1Type: 'dbt', p1Val: Number(newState[unit.value].dbt.toFixed(2)),
+                        p2Type: 'w', p2Val: Number(newState[unit.value].w.toFixed(2)),
+                        mixSource: null,
+                        state: newState
+                    };
+                    points.value.push(pt);
+                    customLines.value.push({ 
+                        id: Date.now() + 1, 
+                        pA: pStart.id, 
+                        pB: newPtId,
+                        color: '#f59e0b',
+                        dash: 'dash'
+                    });
+                    drawChart();
+                };
+
+                const createMixPoint = () => {
+                    if(!mixPtA.value || !mixPtB.value) return alert("請選擇兩個來源點");
+                    if(mixPtA.value === mixPtB.value) return alert("請選擇不同的兩點進行混合");
+                    
+                    const pA = points.value.find(p => p.id === mixPtA.value);
+                    const pB = points.value.find(p => p.id === mixPtB.value);
+                    
+                    let mA = pA.flow / pA.state.SI.v;
+                    let mB = pB.flow / pB.state.SI.v;
+                    let mMix = mA + mB;
+                    
+                    if (mMix <= 0) return alert("兩點的總風量必須大於0才能混合！");
+
+                    let wMix_SI = (mA * pA.state.SI.w + mB * pB.state.SI.w) / mMix; 
+                    let hMix_SI = (mA * pA.state.SI.h + mB * pB.state.SI.h) / mMix; 
+
+                    let newState = resolveState('w', wMix_SI, 'h', hMix_SI, 'SI');
+                    let vMix_Flow = mMix * newState.SI.v; 
+
+                    let pt = {
+                        id: Date.now(),
+                        name: `混合 (${pA.name} + ${pB.name})`,
+                        color: '#8b5cf6', // 預設紫色
+                        flow: Math.round(vMix_Flow),
+                        p1Type: 'dbt', p1Val: Number(newState[unit.value].dbt.toFixed(2)),
+                        p2Type: 'w', p2Val: Number(newState[unit.value].w.toFixed(2)),
+                        mixSource:[pA.id, pB.id],
+                        state: newState
+                    };
+                    points.value.push(pt);
+                    drawChart();
+                };
+
+                const coolingCapacity = computed(() => {
+                    if (!calcPtA.value || !calcPtB.value || !calcFlow.value) return null;
+                    const pA = points.value.find(p => p.id === calcPtA.value);
+                    const pB = points.value.find(p => p.id === calcPtB.value);
+                    if (!pA || !pB) return null;
+
+                    let flow_m3s = 0;
+                    let flow = parseFloat(calcFlow.value);
+                    if (calcFlowUnit.value === 'CMH') flow_m3s = flow / 3600;
+                    else if (calcFlowUnit.value === 'CMM') flow_m3s = flow / 60;
+                    else if (calcFlowUnit.value === 'CFM') flow_m3s = flow * 0.000471947;
+                    else if (calcFlowUnit.value === 'LPS') flow_m3s = flow / 1000;
+
+                    let massFlow = flow_m3s / pA.state.SI.v;
+                    let deltaH = Math.abs(pA.state.SI.h - pB.state.SI.h); 
+                    
+                    let kw = massFlow * deltaH;
+                    return { kW: kw, RT: kw * 0.284345 };
+                });
+
+                const drawChart = () => {
+                    const el = document.getElementById('plotly-chart');
+                    if (!el) return;
+
+                    let traces =[];
+                    let u = unit.value;
+                    let xKey = xAxis.value;
+                    let yKey = yAxis.value;
+
+                    let t_min = u === 'SI' ? -10 : 14;
+                    let t_max = u === 'SI' ? 55 : 131;
+                    let t_step = u === 'SI' ? 1 : 2;
+
+                    // 繪製背景 RH 曲線
+                    for (let rh = 10; rh <= 100; rh += 10) {
+                        let x_vals =[], y_vals =[];
+                        for (let t = t_min; t <= t_max; t += t_step) {
+                            let tempState = computeState(t, 'rh', rh, u === 'SI' ? 'SI' : 'IP');
+                            x_vals.push(tempState[u][xKey]);
+                            y_vals.push(tempState[u][yKey]);
+                        }
+                        traces.push({
+                            x: x_vals, y: y_vals, mode: 'lines',
+                            line: { color: rh === 100 ? '#3b82f6' : '#cbd5e1', width: rh === 100 ? 2 : 1 },
+                            hoverinfo: 'none', showlegend: false
+                        });
+                    }
+
+                    // 繪製各個狀態點 (獨立 Trace 以便顯示在 Legend)
+                    points.value.forEach(pt => {
+                        traces.push({
+                            x: [pt.state[u][xKey]],
+                            y:[pt.state[u][yKey]],
+                            mode: 'markers', // 移除 text，只顯示點
+                            name: pt.name,   // 顯示在 Legend 上的名稱
+                            marker: { size: 12, color: pt.color || '#ef4444', line: { color: 'white', width: 2 } },
+                            hoverinfo: 'x+y+name',
+                            showlegend: true
+                        });
+                    });
+
+                    // 繪製混合點自動連線
+                    points.value.forEach(pt => {
+                        if (pt.mixSource) {
+                            let pA = points.value.find(p => p.id === pt.mixSource[0]);
+                            let pB = points.value.find(p => p.id === pt.mixSource[1]);
+                            if (pA && pB) {
+                                traces.push({
+                                    x:[pA.state[u][xKey], pt.state[u][xKey], pB.state[u][xKey]],
+                                    y:[pA.state[u][yKey], pt.state[u][yKey], pB.state[u][yKey]],
+                                    mode: 'lines',
+                                    line: { color: '#a855f7', width: 2, dash: 'dot' },
+                                    hoverinfo: 'none', showlegend: false
+                                });
+                            }
+                        }
+                    });
+
+                    // 繪製自訂連線
+                    customLines.value.forEach(line => {
+                        let pA = points.value.find(p => p.id === line.pA);
+                        let pB = points.value.find(p => p.id === line.pB);
+                        if (pA && pB) {
+                            traces.push({
+                                x:[pA.state[u][xKey], pB.state[u][xKey]],
+                                y:[pA.state[u][yKey], pB.state[u][yKey]],
+                                mode: 'lines',
+                                line: { color: line.color || '#0d9488', width: 2, dash: line.dash || 'solid' },
+                                hoverinfo: 'none', showlegend: false
+                            });
+                        }
+                    });
+
+                    let xConf = getAxisConfig(xKey, u);
+                    let yConf = getAxisConfig(yKey, u);
+
+                    // 設定 Legend 位置與邊界
+                    let legendConfig = {};
+                    let marginConfig = { r: 40, t: 20 };
+                    
+                    if (legendPosition.value === 'bottom') {
+                        legendConfig = { orientation: 'h', yanchor: 'top', y: -0.15, xanchor: 'center', x: 0.5 };
+                        marginConfig.l = 60;
+                        marginConfig.b = 100; // 預留空間給下方標籤
+                    } else {
+                        // left
+                        legendConfig = { orientation: 'v', yanchor: 'top', y: 1, xanchor: 'right', x: -0.15 };
+                        marginConfig.l = 160; // 預留空間給左側標籤
+                        marginConfig.b = 50;
+                    }
+
+                    let layout = {
+                        title: false,
+                        xaxis: { title: xConf.title, range: xConf.range, gridcolor: '#e5e7eb', zeroline: false },
+                        yaxis: { title: yConf.title, range: yConf.range, gridcolor: '#e5e7eb', zeroline: false },
+                        margin: marginConfig,
+                        showlegend: true,
+                        legend: legendConfig,
+                        plot_bgcolor: '#f8fafc',
+                        paper_bgcolor: 'white'
+                    };
+
+                    Plotly.react(el, traces, layout, { responsive: true, displayModeBar: false });
+                };
+
+                const exportData = () => {
+                    const dataStr = JSON.stringify({ 
+                        unit: unit.value, 
+                        points: points.value, 
+                        customLines: customLines.value,
+                        legendPosition: legendPosition.value,
+                        thHumType: thHumType.value,
+                        thWaterTemp: thWaterTemp.value
+                    });
+                    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', dataUri);
+                    link.setAttribute('download', 'psychrometric_chart.json');
+                    link.click();
+                };
+
+                const importData = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const imported = JSON.parse(e.target.result);
+                            if(imported.unit) unit.value = imported.unit;
+                            if(imported.legendPosition) legendPosition.value = imported.legendPosition;
+                            if(imported.thHumType) thHumType.value = imported.thHumType;
+                            if(imported.thWaterTemp) thWaterTemp.value = imported.thWaterTemp;
+                            if(imported.points) points.value = imported.points;
+                            if(imported.customLines) customLines.value = imported.customLines;
+                            points.value.forEach(pt => handlePointChange(pt));
+                            drawChart();
+                        } catch (err) { alert("匯入失敗: 檔案格式錯誤！"); }
+                    };
+                    reader.readAsText(file);
+                    event.target.value = '';
+                };
+
+                const printPage = () => window.print();
+
+                onMounted(() => {
+                    let oaId = Date.now();
+                    let raId = Date.now() + 1;
+
+                    points.value.push({
+                        id: oaId, name: '外氣 (OA)', color: '#10b981', flow: 1000,
+                        p1Type: 'dbt', p1Val: 35, p2Type: 'rh', p2Val: 60, mixSource: null,
+                        state: resolveState('dbt', 35, 'rh', 60, 'SI')
+                    });
+                    points.value.push({
+                        id: raId, name: '送風 (SA)', color: '#3b82f6', flow: 3000,
+                        p1Type: 'dbt', p1Val: 15, p2Type: 'rh', p2Val: 95, mixSource: null,
+                        state: resolveState('dbt', 15, 'rh', 95, 'SI')
+                    });
+                    
+                    mixPtA.value = oaId; mixPtB.value = raId;
+                    calcPtA.value = oaId; calcPtB.value = raId;
+                    roomStartPt.value = raId;
+
+                    drawChart();
+                    window.addEventListener('resize', () => Plotly.Plots.resize('plotly-chart'));
+                });
+
+                return {
+                    unit, points, customLines, calcFlow, calcFlowUnit, calcPtA, calcPtB, 
+                    mixPtA, mixPtB, xAxis, yAxis, legendPosition, linePtA, linePtB, roomStartPt, roomFlow, roomFlowUnit, rsh, rlh,
+                    thPtA, thPtB, thFlow, thFlowUnit, thHumType, thWaterTemp, thResult, calculateTH,
+                    addPoint, removePoint, getPointName, addCustomLine, removeCustomLine, createMixPoint, createRoomPoint, handlePointChange, coolingCapacity, 
+                    drawChart, exportData, importData, printPage, recalculateAll, showDetails, printDetails
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
