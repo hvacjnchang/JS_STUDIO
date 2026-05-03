@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HVAC & R 專業冷媒熱力學與循環分析系統 (純網頁版 - Worker加速)</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #34495e;
+            --accent: #3498db;
+            --light: #ecf0f1;
+            --danger: #e74c3c;
+            --success: #2ecc71;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; color: var(--primary); }
+        header { background-color: var(--primary); color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .container { display: flex; padding: 20px; gap: 20px; height: calc(100vh - 100px); }
+        
+        /* 控制面板 */
+        .sidebar { flex: 0 0 300px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow-y: auto; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9em; }
+        .form-group select, .form-group input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: var(--accent); color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 10px; font-weight: bold; transition: 0.3s; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        button.outline { background-color: white; color: var(--accent); border: 1px solid var(--accent); }
+        
+        /* 主要顯示區 */
+        .main-content { flex: 1; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
+        .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; border-bottom: 4px solid var(--accent); }
+        .card h3 { margin: 0 0 10px 0; font-size: 1em; color: var(--secondary); }
+        .card .value { font-size: 1.5em; font-weight: bold; color: var(--primary); }
+        
+        /* 圖表與數據表排版 */
+        .visualizations { display: flex; flex-direction: column; gap: 20px; }
+        .chart-wrapper { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px; 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            align-items: center; 
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 100%;
+        }
+        .chart-container { width: 100%; max-width: 100%; height: 450px; position: relative; }
+        .chart-data { width: 100%; display: block; }
+        
+        /* 動態示意圖 CSS */
+        .schematic-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center; position: relative; height: 350px; }
+        .system-diagram { position: relative; width: 600px; height: 300px; border: 2px dashed #bdc3c7; border-radius: 10px; }
+        .component { position: absolute; padding: 10px; border-radius: 8px; text-align: center; font-size: 0.8em; font-weight: bold; color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.2); width: 100px; }
+        .comp-compressor { top: 10px; left: 250px; background: #7f8c8d; }
+        .comp-condenser { top: 100px; right: 20px; background: #27ae60; height: 100px; display: flex; align-items: center; justify-content: center; flex-direction: column;}
+        .comp-evaporator { top: 100px; left: 20px; background: #f39c12; height: 100px; display: flex; align-items: center; justify-content: center; flex-direction: column;}
+        .comp-valve { bottom: 10px; left: 250px; background: #8e44ad; }
+        .pipe-label { position: absolute; font-size: 0.75em; background: rgba(255,255,255,0.9); padding: 2px 5px; border-radius: 3px; border: 1px solid #ccc; color: #333; font-weight: bold; }
+        
+        /* 列印專用樣式 */
+        .print-only { display: none; }
+        .print-summary-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 0.9em; background: white; }
+        .print-summary-table th, .print-summary-table td { border: 1px solid #bdc3c7; padding: 8px; text-align: center; }
+        .print-summary-table th { background-color: #ecf0f1; font-weight: bold; }
+        
+        .watermark { display: none; }
+
+        @media print {
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            body { background-color: white; }
+            .sidebar { display: none; } 
+            .container { display: block; height: auto; padding: 0; width: 100%; max-width: 100%; }
+            .main-content { overflow-y: visible; gap: 15px; width: 100%; max-width: 100%; }
+            .print-only { display: block; }
+            .watermark { display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 60%; max-width: 500px; opacity: 0.15; z-index: 9999; pointer-events: none; }
+            .chart-wrapper { display: block; box-shadow: none; border: 1px solid #7f8c8d; page-break-inside: avoid; margin-bottom: 30px; padding: 15px; box-sizing: border-box; width: 100%; max-width: 100%; }
+            .chart-container { height: 450px !important; width: 100% !important; max-width: 100% !important; margin: 0 auto 15px auto !important; }
+            .chart-data { display: block; width: 100%; margin-top: 15px !important; }
+            .schematic-container { page-break-inside: avoid; box-shadow: none; border: 1px solid #7f8c8d; margin-bottom: 20px; }
+            .dashboard { page-break-inside: avoid; }
+            .card { box-shadow: none; border: 1px solid #7f8c8d; border-bottom: 4px solid var(--accent); }
+        }
+    </style>
+</head>
+<body>
+
+<img src="LOGO.png" class="watermark" alt="Watermark">
+
+<header>
+    <h2>❄️ HVAC & R 專業循環分析系統</h2>
+    <div style="font-size: 0.9em;">版本 3.1 | Web Worker 背景加速版</div>
+</header>
+
+<div class="container">
+    <div class="sidebar">
+        <h3>參數設定</h3>
+        <div class="form-group">
+            <label>單位制</label>
+            <select id="unitSelect" onchange="handleUnitChange()">
+                <option value="metric">公制 (MPa, °C, kW)</option>
+                <option value="imperial">英制 (psia, °F, BTU/s)</option>
+                <option value="si">SI制 (kPa, K, kW)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>冷媒種類</label>
+            <select id="refrigerant" onchange="calculate()">
+                <option value="R134a">R-134a</option>
+                <option value="R410A">R-410A</option>
+                <option value="R32">R-32</option>
+                <option value="R22">R-22</option>
+                <option value="R1234ze(E)">R-1234ze</option>
+                <option value="R717">R-717 (Ammonia)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>適用場合</label>
+            <select id="application" onchange="setDefaults()">
+                <option value="ac">空調 (Air Conditioning)</option>
+                <option value="ref">冷藏 (Refrigeration)</option>
+                <option value="freezer">冷凍 (Freezing)</option>
+                <option value="custom">自訂 (Custom)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>蒸發溫度 (Te)</label>
+            <input type="number" id="te" value="5" step="0.1" onchange="calculate()">
+        </div>
+        <div class="form-group">
+            <label>冷凝溫度 (Tc)</label>
+            <input type="number" id="tc" value="45" step="0.1" onchange="calculate()">
+        </div>
+        <div class="form-group">
+            <label>過熱度 (Superheat) ΔT</label>
+            <input type="number" id="sh" value="5" step="0.1" onchange="calculate()">
+        </div>
+        <div class="form-group">
+            <label>過冷度 (Subcooling) ΔT</label>
+            <input type="number" id="sc" value="5" step="0.1" onchange="calculate()">
+        </div>
+        <div class="form-group">
+            <label>質量流率 (kg/s 或 lb/s)</label>
+            <input type="number" id="m_dot" value="0.1" step="0.01" onchange="calculate()">
+        </div>
+        
+        <hr>
+        <button id="calcBtn" onclick="calculate()" disabled>⏳ 引擎初始化中...</button>
+        <button class="outline" onclick="window.print()">🖨️ 列印報表 (Print)</button>
+        <button class="outline" onclick="exportData()">💾 匯出參數 (Export JSON)</button>
+        
+        <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importData(event)">
+        <button class="outline" onclick="document.getElementById('importFile').click()">📂 匯入參數 (Import JSON)</button>
+    </div>
+
+    <div class="main-content">
+        <div id="print-summary" class="print-only"></div>
+
+        <div class="dashboard">
+            <div class="card" style="border-color: #3498db;">
+                <h3>❄️ 冷凍能力 (Capacity)</h3>
+                <div class="value" id="val_qe">--</div>
+            </div>
+            <div class="card" style="border-color: #e74c3c;">
+                <h3>🔥 冷凝熱量 (Heat Rejection)</h3>
+                <div class="value" id="val_qc">--</div>
+            </div>
+            <div class="card" style="border-color: #f1c40f;">
+                <h3>⚡ 壓縮機功耗 (Work)</h3>
+                <div class="value" id="val_w">--</div>
+            </div>
+            <div class="card" style="border-color: #2ecc71;">
+                <h3>📈 系統 COP</h3>
+                <div class="value" id="val_cop">--</div>
+            </div>
+        </div>
+        
+        <div class="dashboard" style="grid-template-columns: 1fr 1fr;">
+            <div class="card" style="border-color: #9b59b6; padding: 5px;">
+                <h3 style="margin-top: 5px;">熱平衡 (Heat Balance)</h3>
+                <div class="value" id="val_balance" style="font-size: 1.2em;">-- %</div>
+            </div>
+            <div class="card" style="border-color: #34495e; padding: 5px;">
+                <h3 style="margin-top: 5px;">熱力學分析</h3>
+                <div style="font-size: 0.8em; font-weight: bold; color: #e67e22;" id="val_analysis">
+                    ⏳ 正在下載熱力學核心引擎 (WASM)... 請稍候
+                </div>
+            </div>
+        </div>
+
+        <div class="schematic-container">
+            <h3 style="position: absolute; top: 0; left: 20px; color:#7f8c8d;">系統四大元件作動圖</h3>
+            <div class="system-diagram">
+                <div class="component comp-compressor">壓縮機<br>(Compressor)</div>
+                <div class="component comp-condenser">冷凝器<br>(Condenser)</div>
+                <div class="component comp-valve">膨脹閥<br>(Expansion)</div>
+                <div class="component comp-evaporator">蒸發器<br>(Evaporator)</div>
+                
+                <div class="pipe-label" id="pt_1" style="top: 140px; left: 140px; border-left: 3px solid #3498db;">
+                    <strong>點1 (吸氣)</strong><br><span class="t-val"></span><br><span class="p-val"></span>
+                </div>
+                <div class="pipe-label" id="pt_2" style="top: 40px; right: 140px; border-left: 3px solid #e74c3c;">
+                    <strong>點2 (排氣)</strong><br><span class="t-val"></span><br><span class="p-val"></span>
+                </div>
+                <div class="pipe-label" id="pt_3" style="bottom: 40px; right: 140px; border-left: 3px solid #8e44ad;">
+                    <strong>點3 (液管)</strong><br><span class="t-val"></span><br><span class="p-val"></span>
+                </div>
+                <div class="pipe-label" id="pt_4" style="bottom: 140px; left: 140px; border-left: 3px solid #3498db;">
+                    <strong>點4 (入蒸)</strong><br><span class="t-val"></span><br><span class="p-val"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="visualizations">
+            <div class="chart-wrapper">
+                <div class="chart-container" id="ph_diagram"></div>
+                <div class="chart-data" id="data_table_ph"></div>
+            </div>
+            <div class="chart-wrapper">
+                <div class="chart-container" id="ts_diagram"></div>
+                <div class="chart-data" id="data_table_ts"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     主要邏輯與 Web Worker 整合區
+=========================================== -->
+<script>
+    let currentUnit = 'metric'; 
+    let coolpropWorker = null;
+    let isWorkerReady = false;
+
+    // --- 建立 Inline Web Worker ---
+    // 利用 Blob 建立一個獨立執行的執行緒腳本，避免卡住畫面
+    const workerScript = `
+        var Module = {
+            locateFile: function(path) {
+                if (path.endsWith('.wasm')) {
+                    return 'https://cdn.jsdelivr.net/npm/coolprop@6.4.1/' + path;
+                }
+                return path;
+            },
+            onRuntimeInitialized: function() {
+                // WASM 載入完成，通知主執行緒
+                postMessage({ type: 'ready' });
+            }
+        };
+
+        // 引入 CoolProp 核心腳本
+        importScripts('https://cdn.jsdelivr.net/npm/coolprop@6.4.1/coolprop.js');
+
+        // 監聽主執行緒傳來的計算任務
+        self.onmessage = function(e) {
+            if (e.data.type === 'calculate') {
+                const { reqTe, reqTc, reqSH, reqSC, m_dot, ref } = e.data.payload;
+                
+                try {
+                    let Te_K = reqTe + 273.15;
+                    let Tc_K = reqTc + 273.15;
+                    
+                    let Pe_Pa = Module.PropsSI('P', 'T', Te_K, 'Q', 1, ref);
+                    let Pc_Pa = Module.PropsSI('P', 'T', Tc_K, 'Q', 0, ref);
+                    let Pe_MPa = Pe_Pa / 1e6;
+                    let Pc_MPa = Pc_Pa / 1e6;
+
+                    // --- 點 1: 壓縮機吸氣 ---
+                    let T1_K = Te_K + reqSH;
+                    let H1 = Module.PropsSI('H', 'P', Pe_Pa, 'T', T1_K, ref) / 1000;
+                    let S1 = Module.PropsSI('S', 'P', Pe_Pa, 'T', T1_K, ref) / 1000;
+
+                    // --- 點 2: 壓縮機排氣 ---
+                    let S2 = S1;
+                    let H2 = Module.PropsSI('H', 'P', Pc_Pa, 'S', S2 * 1000, ref) / 1000;
+                    let T2_K = Module.PropsSI('T', 'P', Pc_Pa, 'H', H2 * 1000, ref);
+
+                    // --- 點 3: 膨脹閥前液態 ---
+                    let T3_K = Tc_K - reqSC;
+                    let H3 = Module.PropsSI('H', 'P', Pc_Pa, 'T', T3_K, ref) / 1000;
+                    let S3 = Module.PropsSI('S', 'P', Pc_Pa, 'T', T3_K, ref) / 1000;
+
+                    // --- 點 4: 蒸發器入口 ---
+                    let H4 = H3;
+                    let T4_K = Module.PropsSI('T', 'P', Pe_Pa, 'H', H4 * 1000, ref);
+                    let S4 = Module.PropsSI('S', 'P', Pe_Pa, 'H', H4 * 1000, ref) / 1000;
+
+                    // --- 飽和曲線 ---
+                    let T_crit, T_min_prop;
+                    try {
+                        T_crit = Module.Props1SI(ref, 'Tcrit');
+                        T_min_prop = Module.Props1SI(ref, 'Tmin');
+                    } catch(e) {
+                        T_crit = Module.PropsSI('Tcrit', '', 0, '', 0, ref);
+                        T_min_prop = Module.PropsSI('Tmin', '', 0, '', 0, ref);
+                    }
+                    
+                    let T_start = Math.max(T_min_prop, Te_K - 40);
+                    let T_end = T_crit - 0.2;
+                    let steps = 50;
+                    let dome_T = [], dome_P = [], dome_H_liq =[], dome_H_vap = [], dome_S_liq = [], dome_S_vap =[];
+                    
+                    for (let i = 0; i <= steps; i++) {
+                        let T_current = T_start + i * (T_end - T_start) / steps;
+                        let P_current = Module.PropsSI('P', 'T', T_current, 'Q', 0, ref) / 1e6;
+                        let H_l = Module.PropsSI('H', 'T', T_current, 'Q', 0, ref) / 1000;
+                        let S_l = Module.PropsSI('S', 'T', T_current, 'Q', 0, ref) / 1000;
+                        let H_v = Module.PropsSI('H', 'T', T_current, 'Q', 1, ref) / 1000;
+                        let S_v = Module.PropsSI('S', 'T', T_current, 'Q', 1, ref) / 1000;
+                        
+                        dome_T.push(T_current - 273.15); dome_P.push(P_current);
+                        dome_H_liq.push(H_l); dome_H_vap.push(H_v);
+                        dome_S_liq.push(S_l); dome_S_vap.push(S_v);
+                    }
+
+                    const states =[
+                        {id: 1, T: T1_K - 273.15, P: Pe_MPa, H: H1, S: S1},
+                        {id: 2, T: T2_K - 273.15, P: Pc_MPa, H: H2, S: S2},
+                        {id: 3, T: T3_K - 273.15, P: Pc_MPa, H: H3, S: S3},
+                        {id: 4, T: T4_K - 273.15, P: Pe_MPa, H: H4, S: S4}
+                    ];
+                    const domeData = { T: dome_T, P: dome_P, H_liq: dome_H_liq, H_vap: dome_H_vap, S_liq: dome_S_liq, S_vap: dome_S_vap };
+
+                    const Qe = m_dot * (states[0].H - states[3].H); 
+                    const Wc = m_dot * (states[1].H - states[0].H); 
+                    const Qc = m_dot * (states[1].H - states[2].H); 
+                    const COP = Qe / Wc;
+                    const heat_balance = Math.abs((Qc - (Qe + Wc)) / Qc) * 100; 
+
+                    // 算完後傳回給主畫面
+                    postMessage({ type: 'result', payload: { states, domeData, Qe, Wc, Qc, COP, heat_balance } });
+
+                } catch (error) {
+                    let errMsg = "未知錯誤";
+                    try { errMsg = Module.get_global_param_string("errstring"); } catch(e) { errMsg = error.message || error; }
+                    postMessage({ type: 'error', payload: errMsg });
+                }
+            }
+        };
+    `;
+
+    // 初始化 Worker
+    const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+    coolpropWorker = new Worker(URL.createObjectURL(workerBlob));
+
+    // 處理 Worker 回傳的訊息
+    coolpropWorker.onmessage = function(e) {
+        if (e.data.type === 'ready') {
+            isWorkerReady = true;
+            document.getElementById('val_analysis').innerHTML = '<span style="color: #2ecc71;">✅ 引擎已就緒，等待計算</span>';
+            const btn = document.getElementById('calcBtn');
+            btn.disabled = false;
+            btn.innerText = '🔄 執行計算 (Update)';
+            calculate(); // 啟動第一次計算
+        } else if (e.data.type === 'result') {
+            renderResults(e.data.payload);
+        } else if (e.data.type === 'error') {
+            alert("計算發生錯誤，請檢查冷媒參數是否合理：\n" + e.data.payload);
+            document.getElementById('val_analysis').innerHTML = '<span style="color: #e74c3c;">❌ 計算錯誤</span>';
+            document.getElementById('calcBtn').innerText = '🔄 執行計算 (Update)';
+        }
+    };
+
+
+    // --- 主執行緒 UI 邏輯 ---
+    window.addEventListener('resize', () => { Plotly.Plots.resize('ph_diagram'); Plotly.Plots.resize('ts_diagram'); });
+    window.addEventListener('beforeprint', () => { Plotly.Plots.resize('ph_diagram'); Plotly.Plots.resize('ts_diagram'); });
+
+    function handleUnitChange() {
+        const newUnit = document.getElementById('unitSelect').value;
+        if (currentUnit === newUnit) return;
+
+        let te = parseFloat(document.getElementById('te').value);
+        let tc = parseFloat(document.getElementById('tc').value);
+        let sh = parseFloat(document.getElementById('sh').value);
+        let sc = parseFloat(document.getElementById('sc').value);
+        let m_dot = parseFloat(document.getElementById('m_dot').value);
+
+        if (currentUnit === 'imperial') {
+            te = (te - 32) * 5 / 9; tc = (tc - 32) * 5 / 9;
+            sh = sh * 5 / 9; sc = sc * 5 / 9; m_dot = m_dot * 0.453592;
+        } else if (currentUnit === 'si') { te = te - 273.15; tc = tc - 273.15; }
+
+        if (newUnit === 'imperial') {
+            te = te * 9 / 5 + 32; tc = tc * 9 / 5 + 32;
+            sh = sh * 9 / 5; sc = sc * 9 / 5; m_dot = m_dot / 0.453592;
+        } else if (newUnit === 'si') { te = te + 273.15; tc = tc + 273.15; }
+
+        document.getElementById('te').value = te.toFixed(2);
+        document.getElementById('tc').value = tc.toFixed(2);
+        document.getElementById('sh').value = sh.toFixed(2);
+        document.getElementById('sc').value = sc.toFixed(2);
+        document.getElementById('m_dot').value = newUnit === 'imperial' ? m_dot.toFixed(3) : m_dot.toFixed(2);
+
+        currentUnit = newUnit;
+        calculate();
+    }
+
+    function setDefaults() {
+        const app = document.getElementById('application').value;
+        let te = 5, tc = 45; 
+        if(app === 'ac') { te = 5; tc = 45; }
+        if(app === 'ref') { te = -10; tc = 40; }
+        if(app === 'freezer') { te = -25; tc = 40; }
+
+        const unit = document.getElementById('unitSelect').value;
+        if (unit === 'imperial') { te = te * 9 / 5 + 32; tc = tc * 9 / 5 + 32; } 
+        else if (unit === 'si') { te = te + 273.15; tc = tc + 273.15; }
+
+        document.getElementById('te').value = te.toFixed(2);
+        document.getElementById('tc').value = tc.toFixed(2);
+        calculate();
+    }
+
+    function calculate() {
+        if (!isWorkerReady) return;
+
+        const unit = document.getElementById('unitSelect').value;
+        let Te = parseFloat(document.getElementById('te').value);
+        let Tc = parseFloat(document.getElementById('tc').value);
+        const SH = parseFloat(document.getElementById('sh').value);
+        const SC = parseFloat(document.getElementById('sc').value);
+        const m_dot = parseFloat(document.getElementById('m_dot').value);
+        const ref = document.getElementById('refrigerant').value;
+
+        updatePrintSummary(unit, ref, Te, Tc, SH, SC, m_dot);
+
+        // 將單位轉換為基礎運算單位 (Metric) 傳給 Worker
+        let reqTe = Te, reqTc = Tc, reqSH = SH, reqSC = SC;
+        if (unit === 'imperial') {
+            reqTe = (Te - 32) * 5/9; reqTc = (Tc - 32) * 5/9;
+            reqSH = SH * 5/9; reqSC = SC * 5/9; 
+        } else if (unit === 'si') {
+            reqTe = Te - 273.15; reqTc = Tc - 273.15;
+        }
+
+        // 提示計算中
+        document.getElementById('calcBtn').innerText = '⏳ 計算中...';
+        document.getElementById('val_analysis').innerHTML = '<span style="color: #f39c12;">⏳ 背景核心運算中...</span>';
+
+        // 呼叫 Worker 進行背景計算
+        coolpropWorker.postMessage({
+            type: 'calculate',
+            payload: { reqTe, reqTc, reqSH, reqSC, m_dot, ref }
+        });
+    }
+
+    // 接收 Worker 算好的結果並更新 UI
+    function renderResults(data) {
+        const { states, domeData, Qe, Wc, Qc, COP, heat_balance } = data;
+        const unit = document.getElementById('unitSelect').value;
+        const ref = document.getElementById('refrigerant').value;
+        
+        let displayT = '°C', displayP = 'MPa', displayE = 'kW';
+        if (unit === 'imperial') { displayT = '°F'; displayP = 'psia'; displayE = 'BTU/s'; } 
+        else if (unit === 'si') { displayT = 'K'; displayP = 'kPa'; }
+
+        let vQe = Qe, vQc = Qc, vWc = Wc;
+        if(unit === 'imperial') { vQe = Qe * 0.9478; vQc = Qc * 0.9478; vWc = Wc * 0.9478; }
+
+        document.getElementById('val_qe').innerText = vQe.toFixed(2) + ' ' + displayE;
+        document.getElementById('val_qc').innerText = vQc.toFixed(2) + ' ' + displayE;
+        document.getElementById('val_w').innerText = vWc.toFixed(2) + ' ' + displayE;
+        document.getElementById('val_cop').innerText = COP.toFixed(2);
+        document.getElementById('val_balance').innerText = heat_balance.toFixed(2) + ' %';
+        
+        document.getElementById('val_analysis').innerHTML = `
+            <span style="color: #34495e;">
+            壓機壓比 (Pr): ${(states[1].P / states[0].P).toFixed(2)} <br>
+            排氣溫度: ${(unit==='imperial'? (states[1].T*9/5+32).toFixed(1) : unit==='si'? (states[1].T+273.15).toFixed(1) : states[1].T.toFixed(1))} ${displayT} <br>
+            單位冷製量: ${(states[0].H - states[3].H).toFixed(2)} kJ/kg
+            </span>
+        `;
+
+        states.forEach(st => {
+            let p_val = st.P, t_val = st.T;
+            if(unit === 'imperial') { p_val = st.P * 145.038; t_val = st.T * 9/5 + 32; }
+            if(unit === 'si') { p_val = st.P * 1000; t_val = st.T + 273.15; }
+            
+            const el = document.getElementById(`pt_${st.id}`);
+            el.querySelector('.t-val').innerText = `T: ${t_val.toFixed(1)} ${displayT}`;
+            el.querySelector('.p-val').innerText = `P: ${p_val.toFixed(2)} ${displayP}`;
+        });
+
+        updateChartDataTables(states, unit, displayP, displayT);
+        drawCharts(states, ref, displayP, displayT, domeData, unit);
+
+        document.getElementById('calcBtn').innerText = '🔄 執行計算 (Update)';
+    }
+
+    // 繪製與匯出區塊保持不變
+    function updatePrintSummary(unit, ref, Te, Tc, SH, SC, m_dot) {
+        const refSelect = document.getElementById('refrigerant');
+        const refText = refSelect.options[refSelect.selectedIndex].text;
+        const unitText = document.getElementById('unitSelect').options[document.getElementById('unitSelect').selectedIndex].text;
+        
+        let tUnit = '°C', mUnit = 'kg/s';
+        if(unit === 'imperial') { tUnit = '°F'; mUnit = 'lb/s'; }
+        if(unit === 'si') { tUnit = 'K'; mUnit = 'kg/s'; }
+
+        document.getElementById('print-summary').innerHTML = `
+            <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px;">📄 系統輸入參數摘要</h3>
+            <table class="print-summary-table" style="text-align: left;">
+                <tr>
+                    <th style="text-align: left;">冷媒種類</th><td style="text-align: left;">${refText}</td>
+                    <th style="text-align: left;">單位制</th><td style="text-align: left;">${unitText}</td>
+                </tr>
+                <tr>
+                    <th style="text-align: left;">蒸發溫度 (Te)</th><td style="text-align: left;">${Te} ${tUnit}</td>
+                    <th style="text-align: left;">冷凝溫度 (Tc)</th><td style="text-align: left;">${Tc} ${tUnit}</td>
+                </tr>
+                <tr>
+                    <th style="text-align: left;">過熱度 (SH)</th><td style="text-align: left;">${SH} Δ${tUnit}</td>
+                    <th style="text-align: left;">過冷度 (SC)</th><td style="text-align: left;">${SC} Δ${tUnit}</td>
+                </tr>
+                <tr>
+                    <th style="text-align: left;">質量流率</th><td style="text-align: left;">${m_dot} ${mUnit}</td>
+                    <th style="text-align: left;">適用場合</th><td style="text-align: left;">${document.getElementById('application').options[document.getElementById('application').selectedIndex].text}</td>
+                </tr>
+            </table>
+        `;
+    }
+
+    function updateChartDataTables(states, unit, displayP, displayT) {
+        let dataHtml = `
+            <table class="print-summary-table" style="width: 100%; margin-top: 10px;">
+                <tr><th>狀態點 (Point)</th><th>壓力 P (${displayP})</th><th>溫度 T (${displayT})</th><th>焓值 H (kJ/kg)</th><th>熵值 S (kJ/kg-K)</th></tr>
+        `;
+        const pointNames =["1 (吸氣 Suction)", "2 (排氣 Discharge)", "3 (液態 Liquid)", "4 (入蒸 Mixture)"];
+        states.forEach((st, index) => {
+            let p_val = st.P, t_val = st.T;
+            if(unit === 'imperial') { p_val = st.P * 145.038; t_val = st.T * 9/5 + 32; }
+            if(unit === 'si') { p_val = st.P * 1000; t_val = st.T + 273.15; }
+            dataHtml += `<tr><td style="font-weight: bold; background-color: #f9f9f9;">${pointNames[index]}</td><td>${p_val.toFixed(2)}</td><td>${t_val.toFixed(1)}</td><td>${st.H.toFixed(2)}</td><td>${st.S.toFixed(4)}</td></tr>`;
+        });
+        dataHtml += `</table>`;
+        document.getElementById('data_table_ph').innerHTML = dataHtml;
+        document.getElementById('data_table_ts').innerHTML = dataHtml;
+    }
+
+    function drawCharts(states, ref, pUnit, tUnit, domeData, unit) {
+        const H_cycle =[states[0].H, states[1].H, states[2].H, states[3].H, states[0].H];
+        const P_cycle = [states[0].P, states[1].P, states[2].P, states[3].P, states[0].P];
+        const S_cycle =[states[0].S, states[1].S, states[2].S, states[3].S, states[0].S];
+        const T_cycle = [states[0].T, states[1].T, states[2].T, states[3].T, states[0].T];
+
+        let dome_H =[], dome_P = [], dome_S =[], dome_T =[];
+        for(let i = 0; i < domeData.T.length; i++) {
+            let p_val = domeData.P[i], t_val = domeData.T[i];
+            if(unit === 'imperial') { p_val *= 145.038; t_val = t_val * 9/5 + 32; }
+            if(unit === 'si') { p_val *= 1000; t_val += 273.15; }
+            dome_P.push(p_val); dome_T.push(t_val); dome_H.push(domeData.H_liq[i]); dome_S.push(domeData.S_liq[i]);
+        }
+        for(let i = domeData.T.length - 1; i >= 0; i--) {
+            let p_val = domeData.P[i], t_val = domeData.T[i];
+            if(unit === 'imperial') { p_val *= 145.038; t_val = t_val * 9/5 + 32; }
+            if(unit === 'si') { p_val *= 1000; t_val += 273.15; }
+            dome_P.push(p_val); dome_T.push(t_val); dome_H.push(domeData.H_vap[i]); dome_S.push(domeData.S_vap[i]);
+        }
+
+        const trace_ph_dome = { x: dome_H, y: dome_P, mode: 'lines', name: '飽和曲線', line: {color: 'gray', width: 2} };
+        const trace_ph_cycle = { x: H_cycle, y: P_cycle, mode: 'lines+markers+text', name: '冷凍循環', text:['1', '2', '3', '4', ''], textposition: 'top left', line: {color: '#e74c3c', width: 3}, marker: {size: 8, color: '#2c3e50'} };
+        
+        const annotations_ph =[
+            { x: (states[0].H + states[1].H)/2, y: Math.sqrt(states[0].P * states[1].P), text: '等熵線', showarrow: false, font: {color: '#2980b9', size: 11}, xshift: 30 },
+            { x: (states[1].H + states[2].H)/2, y: states[1].P, text: '等壓線', showarrow: false, font: {color: '#c0392b', size: 11}, yshift: 10 },
+            { x: states[2].H, y: Math.sqrt(states[2].P * states[3].P), text: '等焓線', showarrow: false, font: {color: '#8e44ad', size: 11}, xshift: -30 },
+            { x: (states[3].H + states[0].H)/2, y: states[0].P, text: '等壓/等溫線', showarrow: false, font: {color: '#c0392b', size: 11}, yshift: -10 }
+        ];
+
+        Plotly.newPlot('ph_diagram',[trace_ph_dome, trace_ph_cycle], { 
+            title: `P-H Diagram (莫利爾圖) - ${ref}`,
+            xaxis: { title: 'Enthalpy 焓 (kJ/kg)', mirror: 'allticks', showline: true, linecolor: '#bdc3c7', linewidth: 2 },
+            yaxis: { title: `Pressure 壓力 (${pUnit})`, type: 'log', mirror: 'allticks', showline: true, linecolor: '#bdc3c7', linewidth: 2 }, 
+            margin: { l: 60, r: 60, t: 40, b: 60 }, paper_bgcolor: 'transparent', showlegend: false, autosize: true, annotations: annotations_ph
+        }, {responsive: true});
+
+        const trace_ts_dome = { x: dome_S, y: dome_T, mode: 'lines', name: '飽和曲線', line: {color: 'gray', width: 2} };
+        const trace_ts_cycle = { x: S_cycle, y: T_cycle, mode: 'lines+markers+text', name: '冷凍循環', text:['1', '2', '3', '4', ''], textposition: 'top left', line: {color: '#3498db', width: 3}, marker: {size: 8, color: '#2c3e50'} };
+
+        const annotations_ts = [
+            { x: states[0].S, y: (states[0].T + states[1].T)/2, text: '等熵線', showarrow: false, font: {color: '#2980b9', size: 11}, xshift: 30 },
+            { x: (states[1].S + states[2].S)/2, y: (states[1].T + states[2].T)/2, text: '等壓線', showarrow: false, font: {color: '#c0392b', size: 11}, yshift: 10 },
+            { x: (states[2].S + states[3].S)/2, y: (states[2].T + states[3].T)/2, text: '等焓線', showarrow: false, font: {color: '#8e44ad', size: 11}, xshift: -30 },
+            { x: (states[3].S + states[0].S)/2, y: states[0].T, text: '等壓/等溫線', showarrow: false, font: {color: '#c0392b', size: 11}, yshift: -10 }
+        ];
+
+        Plotly.newPlot('ts_diagram',[trace_ts_dome, trace_ts_cycle], {
+            title: `T-S Diagram (溫熵圖) - ${ref}`,
+            xaxis: { title: 'Entropy 熵 (kJ/kg-K)', mirror: 'allticks', showline: true, linecolor: '#bdc3c7', linewidth: 2 },
+            yaxis: { title: `Temperature 溫度 (${tUnit})`, mirror: 'allticks', showline: true, linecolor: '#bdc3c7', linewidth: 2 },
+            margin: { l: 60, r: 60, t: 40, b: 60 }, paper_bgcolor: 'transparent', showlegend: false, autosize: true, annotations: annotations_ts
+        }, {responsive: true});
+    }
+
+    function exportData() {
+        const data = {
+            unit: document.getElementById('unitSelect').value,
+            refrigerant: document.getElementById('refrigerant').value,
+            application: document.getElementById('application').value,
+            Te: document.getElementById('te').value, Tc: document.getElementById('tc').value,
+            SH: document.getElementById('sh').value, SC: document.getElementById('sc').value, m_dot: document.getElementById('m_dot').value
+        };
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+        const a = document.createElement('a');
+        a.href = dataStr; a.download = "HVAC_Parameters.json";
+        document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function importData(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                if(data.unit) { document.getElementById('unitSelect').value = data.unit; currentUnit = data.unit; }
+                if(data.refrigerant) document.getElementById('refrigerant').value = data.refrigerant;
+                if(data.application) document.getElementById('application').value = data.application;
+                if(data.Te !== undefined) document.getElementById('te').value = data.Te;
+                if(data.Tc !== undefined) document.getElementById('tc').value = data.Tc;
+                if(data.SH !== undefined) document.getElementById('sh').value = data.SH;
+                if(data.SC !== undefined) document.getElementById('sc').value = data.SC;
+                if(data.m_dot !== undefined) document.getElementById('m_dot').value = data.m_dot;
+                calculate();
+                alert("✅ 參數匯入成功！");
+            } catch (err) { alert("❌ 匯入失敗，檔案格式錯誤！"); }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    }
+</script>
+
+</body>
+</html>
