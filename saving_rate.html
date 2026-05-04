@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>冰水機組汰換節能評估工具</title>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Chart.js & DataLabels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 自訂捲軸樣式 */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+        
+        /* 列印樣式設定 */
+        @media print {
+            body { background-color: white !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .print-container { width: 100%; max-width: 100%; padding: 0; margin: 0; overflow: visible !important; height: auto !important; }
+            
+            /* 強制列印背景色與圖形 */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            /* 避免區塊在列印時被截斷 */
+            .print-section {
+                page-break-inside: avoid;
+                margin-bottom: 2rem;
+            }
+            
+            /* 浮水印設定 (置於最上層) */
+            .print-watermark {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background-image: url('LOGO.png');
+                background-repeat: no-repeat;
+                background-position: center;
+                background-size: 50%;
+                opacity: 0.08;
+                z-index: 9999; /* 確保在最上層 */
+                pointer-events: none;
+            }
+        }
+        .print-only { display: none; }
+        input[type="number"] { text-align: right; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
+
+<div id="app" class="h-screen flex flex-col">
+    
+    <!-- Header (固定在上方) -->
+    <header class="bg-brand-900 text-white shadow-md no-print sticky top-0 z-50 h-[72px] flex-shrink-0">
+        <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 h-full flex justify-between items-center">
+            <!-- 左側 LOGO 與標題 -->
+            <div class="flex items-center gap-3">
+                <img src="LOGO.png" alt="LOGO" class="h-10 object-contain" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                <svg class="w-8 h-8 text-brand-500 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                <h1 class="text-2xl font-bold tracking-wider">冰水機組汰換節能評估工具</h1>
+            </div>
+            
+            <!-- 右側 操作按鈕 -->
+            <div class="flex items-center gap-2">
+                <input type="file" id="importFile" class="hidden" accept=".json" @change="importJSON">
+                <button @click="triggerImport" class="px-3 py-1.5 bg-brand-800 border border-brand-700 text-white rounded hover:bg-brand-700 transition text-sm flex items-center">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    匯入
+                </button>
+                <button @click="exportJSON" class="px-3 py-1.5 bg-brand-800 border border-brand-700 text-white rounded hover:bg-brand-700 transition text-sm flex items-center">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    匯出
+                </button>
+                <button @click="exportSummary" class="px-3 py-1.5 bg-brand-500 text-white rounded hover:bg-brand-400 transition text-sm flex items-center ml-2">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    文字摘要
+                </button>
+                <button @click="printReport" class="px-3 py-1.5 bg-green-500 text-white rounded hover:bg-green-400 transition text-sm flex items-center">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                    預覽/列印
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content (左右獨立滾動區) -->
+    <main class="flex-grow max-w-[1400px] mx-auto w-full lg:h-[calc(100vh-72px)] print-container">
+        
+        <!-- Web UI: 網頁互動區 -->
+        <div class="no-print grid grid-cols-1 lg:grid-cols-12 gap-6 h-full p-4 sm:p-6">
+            
+            <!-- Left Column: 輸入參數區塊 (獨立滾動) -->
+            <div class="lg:col-span-4 lg:h-full lg:overflow-y-auto custom-scrollbar pr-2 space-y-6 pb-10">
+                
+                <!-- 既有設備 -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="bg-slate-100 px-4 py-3 border-b border-slate-200 font-semibold text-brand-900 flex items-center justify-between">
+                        <div class="flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                            既有設備 (定頻主機)
+                        </div>
+                    </div>
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">額定冷凍噸 (RT)</label>
+                            <input v-model.number="params.oldRT" type="number" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">額定 COP 值</label>
+                            <input v-model.number="params.oldCOP" type="number" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">運轉年數 <span class="text-xs text-red-500">(每年衰減 {{ params.decayRate }}%)</span></label>
+                            <input v-model.number="params.oldYears" type="number" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                            <p class="text-xs text-slate-500 mt-1 text-right">衰減後實際 COP: <span class="font-bold text-red-600">{{ results.actualOldCOP }}</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 新設設備 (導入 IPLV 權重計算) -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="bg-brand-50 px-4 py-3 border-b border-brand-100 font-semibold text-brand-900 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg>
+                        新設設備 (變頻主機)
+                    </div>
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">額定冷凍噸 (RT)</label>
+                            <input v-model.number="params.newRT" type="number" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                        </div>
+                        
+                        <!-- IPLV 權重輸入區 -->
+                        <div class="border border-slate-200 rounded-md p-3 bg-slate-50">
+                            <label class="block text-sm font-bold text-slate-700 mb-2">各負載點 COP 效率 (AHRI 標準)</label>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500">100% 負載 (A)</label>
+                                    <input v-model.number="params.newCop100" type="number" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-white border p-1.5 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500">75% 負載 (B)</label>
+                                    <input v-model.number="params.newCop75" type="number" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-white border p-1.5 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500">50% 負載 (C)</label>
+                                    <input v-model.number="params.newCop50" type="number" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-white border p-1.5 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500">25% 負載 (D)</label>
+                                    <input v-model.number="params.newCop25" type="number" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-white border p-1.5 text-sm">
+                                </div>
+                            </div>
+                            <div class="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center">
+                                <span class="text-xs font-bold text-slate-600">綜合部分負載價值 (IPLV)</span>
+                                <span class="text-lg font-bold text-brand-600">{{ calculatedIPLV }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 經濟與環境參數 -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="bg-slate-100 px-4 py-3 border-b border-slate-200 font-semibold text-brand-900 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        經濟與環境參數
+                    </div>
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">年運轉時數 (hr/year)</label>
+                            <input v-model.number="params.hours" type="number" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">每度電費 (NTD/kWh)</label>
+                            <input v-model.number="params.electricityRate" type="number" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600">電力排放係數 (kg CO₂e/kWh)</label>
+                            <input v-model.number="params.emissionFactor" type="number" step="0.001" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50 border p-2">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: 儀表板與圖表區 (獨立滾動) -->
+            <div class="lg:col-span-8 lg:h-full lg:overflow-y-auto custom-scrollbar pr-2 space-y-6 pb-10">
+                <!-- KPI Dashboard -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-t-4 border-t-red-400">
+                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wide">既有設備年耗電</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-800">{{ formatNum(results.oldEnergy) }} <span class="text-sm font-normal text-slate-500">kWh</span></p>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-t-4 border-t-brand-500">
+                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wide">新設設備年耗電</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-800">{{ formatNum(results.newEnergy) }} <span class="text-sm font-normal text-slate-500">kWh</span></p>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-t-4 border-t-green-500">
+                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wide">年省電費預估</p>
+                        <p class="mt-2 text-2xl font-semibold text-green-600">{{ formatNum(results.costSavings) }} <span class="text-sm font-normal text-slate-500">NTD</span></p>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-t-4 border-t-emerald-400">
+                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wide">年減碳總量</p>
+                        <p class="mt-2 text-2xl font-semibold text-emerald-600">{{ formatNum(results.carbonReduction) }} <span class="text-sm font-normal text-slate-500">kg CO₂e</span></p>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Bar Chart -->
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                        <h3 class="text-center text-sm font-bold text-slate-600 mb-4">能源消耗對比圖 (kWh/年)</h3>
+                        <div class="relative h-72 w-full">
+                            <canvas id="barChart"></canvas>
+                        </div>
+                    </div>
+                    <!-- Doughnut Chart (縮小圖表並切齊文字) -->
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                        <h3 class="text-center text-sm font-bold text-slate-600 mb-4">節能潛力佔比指標</h3>
+                        <div class="relative h-72 w-full">
+                            <!-- 縮小圖表：使用 pb-12 留出底部空間 -->
+                            <div class="absolute inset-0 pb-12">
+                                <canvas id="doughnutChart"></canvas>
+                            </div>
+                            <!-- 文字對齊：固定在底部，高度與 Bar Chart 的 X 軸標籤區域切齊 -->
+                            <div class="absolute bottom-0 left-0 w-full h-10 flex items-end justify-center pb-1.5">
+                                <span class="text-3xl font-bold text-brand-500 leading-none">{{ results.savingRatio }}%</span>
+                                <span class="text-sm text-slate-500 ml-1 leading-none mb-0.5"> 節能率</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Print View: 列印報告專用視圖 (網頁時隱藏) -->
+        <div class="print-only font-serif text-black leading-relaxed p-8">
+            <!-- 列印浮水印 (置於最上層) -->
+            <div class="print-watermark"></div>
+
+            <h1 class="text-3xl font-bold text-center mb-8 border-b-2 border-black pb-4">冰水機組汰換節能評估結案報告</h1>
+            
+            <!-- ================= 1. 評估參數設定 ================= -->
+            <div class="print-section">
+                <h2 class="text-xl font-bold mb-4 bg-slate-200 px-2 py-1">一、 評估參數設定</h2>
+                <table class="w-full text-left border-collapse border border-black mb-2 text-sm">
+                    <thead>
+                        <tr>
+                            <th class="border border-black p-2 w-1/4">類別</th>
+                            <th class="border border-black p-2 w-1/2">參數名稱</th>
+                            <th class="border border-black p-2 w-1/4">數值設定</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td rowspan="4" class="border border-black p-2 align-top">既有設備 (定頻)</td><td class="border border-black p-2">額定冷凍噸 (RT)</td><td class="border border-black p-2">{{ params.oldRT }}</td></tr>
+                        <tr><td class="border border-black p-2">額定 COP 值</td><td class="border border-black p-2">{{ params.oldCOP }}</td></tr>
+                        <tr><td class="border border-black p-2">運轉年數 (年)</td><td class="border border-black p-2">{{ params.oldYears }}</td></tr>
+                        <tr><td class="border border-black p-2 text-red-600 font-bold">衰減後實際 COP</td><td class="border border-black p-2 text-red-600 font-bold">{{ results.actualOldCOP }}</td></tr>
+                        
+                        <tr><td rowspan="6" class="border border-black p-2 align-top">新設設備 (變頻)</td><td class="border border-black p-2">額定冷凍噸 (RT)</td><td class="border border-black p-2">{{ params.newRT }}</td></tr>
+                        <tr><td class="border border-black p-2 text-slate-500">100% 負載 COP (A)</td><td class="border border-black p-2 text-slate-500">{{ params.newCop100 }}</td></tr>
+                        <tr><td class="border border-black p-2 text-slate-500">75% 負載 COP (B)</td><td class="border border-black p-2 text-slate-500">{{ params.newCop75 }}</td></tr>
+                        <tr><td class="border border-black p-2 text-slate-500">50% 負載 COP (C)</td><td class="border border-black p-2 text-slate-500">{{ params.newCop50 }}</td></tr>
+                        <tr><td class="border border-black p-2 text-slate-500">25% 負載 COP (D)</td><td class="border border-black p-2 text-slate-500">{{ params.newCop25 }}</td></tr>
+                        <tr><td class="border border-black p-2 font-bold text-brand-700">綜合部分負載價值 (IPLV)</td><td class="border border-black p-2 font-bold text-brand-700">{{ calculatedIPLV }}</td></tr>
+                        
+                        <tr><td rowspan="3" class="border border-black p-2 align-top">環境與經濟性</td><td class="border border-black p-2">年運轉時數 (hr/year)</td><td class="border border-black p-2">{{ params.hours }}</td></tr>
+                        <tr><td class="border border-black p-2">每度電費 (NTD/kWh)</td><td class="border border-black p-2">{{ params.electricityRate }}</td></tr>
+                        <tr><td class="border border-black p-2">電力排放係數 (kg CO₂e)</td><td class="border border-black p-2">{{ params.emissionFactor }}</td></tr>
+                    </tbody>
+                </table>
+                <p class="text-sm text-slate-800 font-bold mb-8">※ 註：既有冰水機衰減率是以每年衰減 {{ params.decayRate }}% 估算。</p>
+            </div>
+
+            <!-- ================= 2. 節能效益儀表板 ================= -->
+            <div class="print-section">
+                <h2 class="text-xl font-bold mb-4 bg-slate-200 px-2 py-1">二、 節能效益儀表板</h2>
+                <div class="grid grid-cols-4 gap-4 mb-10">
+                    <div class="border-2 border-slate-300 p-4 rounded-lg text-center bg-white">
+                        <p class="text-xs text-slate-500 font-bold uppercase">既有設備年耗電</p>
+                        <p class="mt-2 text-xl font-bold text-slate-800">{{ formatNum(results.oldEnergy) }} <span class="text-xs font-normal">kWh</span></p>
+                    </div>
+                    <div class="border-2 border-slate-300 p-4 rounded-lg text-center bg-white">
+                        <p class="text-xs text-slate-500 font-bold uppercase">新設設備年耗電</p>
+                        <p class="mt-2 text-xl font-bold text-slate-800">{{ formatNum(results.newEnergy) }} <span class="text-xs font-normal">kWh</span></p>
+                    </div>
+                    <div class="border-2 border-slate-300 p-4 rounded-lg text-center bg-white">
+                        <p class="text-xs text-slate-500 font-bold uppercase">年省電費預估</p>
+                        <p class="mt-2 text-xl font-bold text-green-600">{{ formatNum(results.costSavings) }} <span class="text-xs font-normal">NTD</span></p>
+                    </div>
+                    <div class="border-2 border-slate-300 p-4 rounded-lg text-center bg-white">
+                        <p class="text-xs text-slate-500 font-bold uppercase">年減碳總量</p>
+                        <p class="mt-2 text-xl font-bold text-emerald-600">{{ formatNum(results.carbonReduction) }} <span class="text-xs font-normal">kg CO₂e</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= 3. 能源消耗與節能佔比 ================= -->
+            <div class="print-section">
+                <h2 class="text-xl font-bold mb-4 bg-slate-200 px-2 py-1">三、 能源消耗與節能佔比</h2>
+                <div class="grid grid-cols-2 gap-8 mb-8">
+                    <div class="border-2 border-slate-300 p-4 rounded-lg text-center bg-white">
+                        <h3 class="text-sm font-bold text-slate-600 mb-4">能源消耗對比圖 (kWh/年)</h3>
+                        <img id="printBarChartImg" class="mx-auto h-64 object-contain">
+                    </div>
+                    <div class="border-2 border-slate-300 p-4 rounded-lg text-center bg-white">
+                        <h3 class="text-sm font-bold text-slate-600 mb-4">節能潛力佔比指標</h3>
+                        <img id="printDoughnutChartImg" class="mx-auto h-56 object-contain">
+                        <div class="mt-2">
+                            <span class="text-2xl font-bold text-brand-500">{{ results.savingRatio }}%</span>
+                            <span class="text-sm text-slate-500"> 節能率</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= 4. 標準熱力學轉換與計算公式 ================= -->
+            <div class="print-section">
+                <h2 class="text-xl font-bold mb-4 bg-slate-200 px-2 py-1">四、 標準熱力學轉換與計算公式</h2>
+                <p class="mb-2"><strong>標準熱力轉換基準：</strong> 1 RT = 3.516 kW</p>
+                <div class="bg-slate-50 p-4 border border-slate-300 font-mono text-sm space-y-3 mb-8">
+                    <p>1. 既有設備年用電量 ($E_{old}$)</p>
+                    <p class="pl-4 text-xs text-slate-500">※ 實際 COP = 額定 COP × (1 - {{ params.decayRate/100 }})^運轉年數 = {{ params.oldCOP }} × ({{ (1 - params.decayRate/100).toFixed(3) }})^{{ params.oldYears }} = {{ results.actualOldCOP }}</p>
+                    <p class="pl-4">=[ (RT × 3.516) / 實際 COP ] × 年運轉時數</p>
+                    <p class="pl-4">=[ ({{ params.oldRT }} × 3.516) / {{ results.actualOldCOP }} ] × {{ params.hours }}</p>
+                    <p class="pl-4 font-bold text-red-600">= {{ formatNum(results.oldEnergy) }} kWh/year</p>
+                    <hr class="border-slate-300 my-2">
+                    <p>2. 新設設備年用電量 ($E_{new}$)</p>
+                    <p class="pl-4 text-xs text-slate-500">※ 變頻主機 IPLV = 0.01A + 0.42B + 0.45C + 0.12D</p>
+                    <p class="pl-4 text-xs text-slate-500">※ IPLV = 0.01({{params.newCop100}}) + 0.42({{params.newCop75}}) + 0.45({{params.newCop50}}) + 0.12({{params.newCop25}}) = {{ calculatedIPLV }}</p>
+                    <p class="pl-4">=[ (RT × 3.516) / IPLV ] × 年運轉時數</p>
+                    <p class="pl-4">=[ ({{ params.newRT }} × 3.516) / {{ calculatedIPLV }} ] × {{ params.hours }}</p>
+                    <p class="pl-4 font-bold text-brand-600">= {{ formatNum(results.newEnergy) }} kWh/year</p>
+                </div>
+            </div>
+
+            <!-- ================= 5. 節能效益與減碳貢獻計算過程 ================= -->
+            <div class="print-section">
+                <h2 class="text-xl font-bold mb-4 bg-slate-200 px-2 py-1">五、 節能效益與減碳貢獻計算過程</h2>
+                <div class="bg-slate-50 p-4 border border-slate-300 font-mono text-sm space-y-4">
+                    <div>
+                        <p><strong>A. 節能量 ($\Delta E$)</strong></p>
+                        <p class="pl-4">= $E_{old}$ - $E_{new}$</p>
+                        <p class="pl-4">= {{ formatNum(results.oldEnergy) }} - {{ formatNum(results.newEnergy) }}</p>
+                        <p class="pl-4 font-bold">= {{ formatNum(results.energySavings) }} kWh/year</p>
+                    </div>
+                    <div>
+                        <p><strong>B. 節能率 (%)</strong></p>
+                        <p class="pl-4">= ($\Delta E$ / $E_{old}$) × 100%</p>
+                        <p class="pl-4">= ({{ formatNum(results.energySavings) }} / {{ formatNum(results.oldEnergy) }}) × 100%</p>
+                        <p class="pl-4 font-bold">= {{ results.savingRatio }} %</p>
+                    </div>
+                    <div>
+                        <p><strong>C. 年減碳量 (Carbon Reduction)</strong></p>
+                        <p class="pl-4">= $\Delta E$ × 電力排放係數</p>
+                        <p class="pl-4">= {{ formatNum(results.energySavings) }} × {{ params.emissionFactor }}</p>
+                        <p class="pl-4 font-bold text-emerald-600">= {{ formatNum(results.carbonReduction) }} kg CO₂e/year</p>
+                    </div>
+                    <div>
+                        <p><strong>D. 年省電費 (Cost Savings)</strong></p>
+                        <p class="pl-4">= $\Delta E$ × 每度電費</p>
+                        <p class="pl-4">= {{ formatNum(results.energySavings) }} × {{ params.electricityRate }}</p>
+                        <p class="pl-4 font-bold text-green-600">= {{ formatNum(results.costSavings) }} NTD/year</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 簽核區 -->
+            <div class="mt-12 pt-8 border-t border-black flex justify-between items-end print-section">
+                <div>
+                    <p>評估日期： {{ currentDate }}</p>
+                    <p>製表系統： 冰水機組汰換節能評估工具</p>
+                </div>
+                <div class="w-64">
+                    <p class="border-b border-black h-8"></p>
+                    <p class="text-center mt-2">評估人員簽核</p>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+</div>
+
+<script>
+    // 註冊 Chart.js DataLabels 插件
+    Chart.register(ChartDataLabels);
+
+    const { createApp, reactive, computed, watch, onMounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            // State: 輸入參數預設值
+            const params = reactive({
+                oldRT: 500,
+                oldCOP: 3.5,
+                oldYears: 15,
+                decayRate: 1.1, // 動態衰減率變數
+                newRT: 500,
+                newCop100: 5.5,
+                newCop75: 6.2,
+                newCop50: 7.0,
+                newCop25: 6.8,
+                hours: 8760,
+                electricityRate: 3.5,
+                emissionFactor: 0.747
+            });
+
+            // Computed: 計算 IPLV (依據 AHRI 550/590 權重公式)
+            const calculatedIPLV = computed(() => {
+                const a = params.newCop100 || 0;
+                const b = params.newCop75 || 0;
+                const c = params.newCop50 || 0;
+                const d = params.newCop25 || 0;
+                const iplv = (0.01 * a) + (0.42 * b) + (0.45 * c) + (0.12 * d);
+                return iplv.toFixed(3);
+            });
+
+            // Computed: 計算邏輯
+            const results = computed(() => {
+                const baseOldCOP = params.oldCOP || 1;
+                const years = params.oldYears || 0;
+                const iplv = parseFloat(calculatedIPLV.value) || 1;
+                
+                // 計算衰減後的實際 COP
+                const actualOldCOP = baseOldCOP * Math.pow(1 - (params.decayRate / 100), years);
+                
+                // 依據公式計算 E_old 與 E_new (使用 3.516 做基準)
+                const oldEnergy = ((params.oldRT * 3.516) / actualOldCOP) * params.hours;
+                const newEnergy = ((params.newRT * 3.516) / iplv) * params.hours;
+                
+                const energySavings = oldEnergy - newEnergy;
+                const savingRatio = oldEnergy > 0 ? ((energySavings / oldEnergy) * 100).toFixed(1) : 0;
+                
+                const carbonReduction = energySavings * params.emissionFactor;
+                const costSavings = energySavings * params.electricityRate;
+
+                return {
+                    actualOldCOP: actualOldCOP.toFixed(3),
+                    oldEnergy: Math.round(oldEnergy),
+                    newEnergy: Math.round(newEnergy),
+                    energySavings: Math.round(energySavings),
+                    savingRatio: savingRatio,
+                    carbonReduction: Math.round(carbonReduction),
+                    costSavings: Math.round(costSavings)
+                };
+            });
+
+            // Utilities
+            const formatNum = (num) => {
+                return Number(num).toLocaleString('en-US');
+            };
+
+            const currentDate = computed(() => {
+                const d = new Date();
+                return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+            });
+
+            // Charts variables
+            let barChartInstance = null;
+            let doughnutChartInstance = null;
+
+            // Render Charts Logic
+            const renderCharts = () => {
+                const ctxBar = document.getElementById('barChart');
+                const ctxDoughnut = document.getElementById('doughnutChart');
+
+                if(!ctxBar || !ctxDoughnut) return;
+
+                // --- Bar Chart (柱狀圖) ---
+                if (barChartInstance) barChartInstance.destroy();
+                barChartInstance = new Chart(ctxBar, {
+                    type: 'bar',
+                    data: {
+                        labels:['既有設備', '新設設備'],
+                        datasets:[{
+                            label: '年用電量 (kWh)',
+                            data:[results.value.oldEnergy, results.value.newEnergy],
+                            backgroundColor:['#f87171', '#0ea5e9'],
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 500 },
+                        plugins: { 
+                            legend: { display: false },
+                            datalabels: {
+                                color: '#fff',
+                                font: { weight: 'bold' },
+                                formatter: (value) => formatNum(value)
+                            }
+                        },
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+
+                // --- Doughnut Chart (環形圖) ---
+                if (doughnutChartInstance) doughnutChartInstance.destroy();
+                const saved = Math.max(0, results.value.energySavings);
+                const remain = Math.max(0, results.value.newEnergy);
+
+                doughnutChartInstance = new Chart(ctxDoughnut, {
+                    type: 'doughnut',
+                    data: {
+                        labels:['節省耗電', '汰換後剩餘耗電'],
+                        datasets: [{
+                            data:[saved, remain],
+                            backgroundColor:['#22c55e', '#e2e8f0'],
+                            hoverOffset: 4,
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '70%',
+                        animation: { duration: 500 },
+                        plugins: {
+                            legend: { position: 'bottom' },
+                            datalabels: {
+                                color: (context) => {
+                                    // 節省耗電(綠色)改為黑色(#000000)，剩餘耗電(灰色)維持深色
+                                    return context.dataIndex === 0 ? '#000000' : '#475569';
+                                },
+                                font: { weight: 'bold', size: 14 },
+                                formatter: (value) => {
+                                    if(value === 0) return '';
+                                    return formatNum(value);
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+
+            // Watch params to re-render charts
+            watch(results, () => {
+                renderCharts();
+            }, { deep: true });
+
+            onMounted(() => {
+                renderCharts();
+            });
+
+            // Actions
+            const triggerImport = () => {
+                document.getElementById('importFile').click();
+            };
+
+            const importJSON = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        Object.assign(params, data);
+                        alert('參數匯入成功！');
+                    } catch (err) {
+                        alert('匯入失敗，請確認檔案格式是否正確。');
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            };
+
+            const exportJSON = () => {
+                const dataStr = JSON.stringify(params, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Chiller_Params_${new Date().getTime()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const exportSummary = () => {
+                const summary = `
+=========================================
+      冰水機組汰換節能評估 結案摘要      
+=========================================[ 既有設備參數 ]
+- 額定冷凍噸: ${params.oldRT} RT
+- 額定 COP 值: ${params.oldCOP}
+- 運轉年數: ${params.oldYears} 年 (每年衰減 ${params.decayRate}%)
+- 衰減後實際 COP: ${results.value.actualOldCOP}
+
+[ 新設設備參數 ]
+- 額定冷凍噸: ${params.newRT} RT
+- 100% 負載 COP (A): ${params.newCop100}
+- 75% 負載 COP (B): ${params.newCop75}
+- 50% 負載 COP (C): ${params.newCop50}
+- 25% 負載 COP (D): ${params.newCop25}
+- 綜合部分負載價值 (IPLV): ${calculatedIPLV.value}
+
+[ 經濟與環境參數 ]
+- 年運轉時數: ${params.hours} hr/year
+- 每度電費: ${params.electricityRate} NTD/kWh
+- 電力排放係數: ${params.emissionFactor} kg CO2e/kWh
+
+-----------------------------------------
+[ 評估結果 (KPI) ]
+- 既有設備耗電量: ${formatNum(results.value.oldEnergy)} kWh/年
+- 新設設備耗電量: ${formatNum(results.value.newEnergy)} kWh/年
+- 總節電量: ${formatNum(results.value.energySavings)} kWh/年
+- 綜合節能率: ${results.value.savingRatio} %
+- 年減碳總量: ${formatNum(results.value.carbonReduction)} kg CO2e/年
+- 年省電費估算: ${formatNum(results.value.costSavings)} NTD/年
+=========================================
+`;
+                const blob = new Blob([summary], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Chiller_Summary_${new Date().getTime()}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // 預覽/列印功能：將 Canvas 轉為圖片後再呼叫列印
+            const printReport = () => {
+                const barCanvas = document.getElementById('barChart');
+                const doughnutCanvas = document.getElementById('doughnutChart');
+                
+                if (barCanvas) {
+                    document.getElementById('printBarChartImg').src = barCanvas.toDataURL('image/png');
+                }
+                if (doughnutCanvas) {
+                    document.getElementById('printDoughnutChartImg').src = doughnutCanvas.toDataURL('image/png');
+                }
+                
+                // 確保圖片載入 DOM 後再觸發列印
+                nextTick(() => {
+                    setTimeout(() => {
+                        window.print();
+                    }, 150);
+                });
+            };
+
+            return {
+                params,
+                calculatedIPLV,
+                results,
+                formatNum,
+                currentDate,
+                triggerImport,
+                importJSON,
+                exportJSON,
+                exportSummary,
+                printReport
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
