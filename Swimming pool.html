@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>傑昇 HVAC&R - 泳池熱負荷計算</title>
+    <style>
+        /* 全局變數與基礎設定 */
+        :root {
+            --primary-color: #0078D7;
+            --header-height: 80px;
+            --border-color: #ddd;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, 'Microsoft JhengHei';
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 頂部固定表頭 */
+        header {
+            height: var(--header-height);
+            background-color: #fff;
+            border-bottom: 2px solid var(--primary-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            flex-shrink: 0;
+            z-index: 100;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        header img.logo {
+            height: 60px;
+            object-fit: contain;
+        }
+        .brand h1 {
+            margin: 0;
+            font-size: 24px;
+            color: var(--primary-color);
+            letter-spacing: 1px;
+        }
+        .header-actions button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            margin-left: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 15px;
+            transition: background 0.2s;
+        }
+        .header-actions button:hover {
+            background-color: #005a9e;
+        }
+
+        /* 內容區：左右分欄 */
+        .container {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - var(--header-height));
+        }
+
+        /* 輸入區與輸出區共用滾動設定 */
+        .input-panel, .output-panel {
+            flex: 1;
+            padding: 20px 30px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+
+        /* 輸入區專屬樣式 */
+        .input-panel {
+            border-right: 1px solid var(--border-color);
+            background-color: #f9f9f9;
+            max-width: 450px;
+        }
+        .input-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 10px;
+        }
+        .input-header h2 {
+            margin: 0;
+        }
+        .btn-calc {
+            background-color: #28a745;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .btn-calc:hover {
+            background-color: #218838;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .flex-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* 輸出區專屬樣式 */
+        .output-panel {
+            background-color: #fff;
+            position: relative;
+        }
+        .calc-step {
+            background: #f1f8ff;
+            padding: 15px;
+            border-left: 4px solid var(--primary-color);
+            margin-bottom: 20px;
+            border-radius: 0 4px 4px 0;
+        }
+        .calc-step h3 {
+            margin-top: 0;
+            color: var(--primary-color);
+            border-bottom: 1px solid #cce5ff;
+            padding-bottom: 5px;
+        }
+        .formula {
+            font-family: 'Courier New', Courier, monospace;
+            background: #fff;
+            padding: 8px;
+            border: 1px dashed #aaa;
+            margin: 10px 0;
+        }
+        .substitution {
+            color: #555;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        .result-highlight {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #d9534f;
+        }
+
+        /* 列印與浮水印專屬樣式 */
+        .print-watermark {
+            display: none;
+        }
+        @media print {
+            @page {
+                margin: 15mm;
+            }
+            body {
+                overflow: visible;
+                height: auto;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            /* 隱藏不需要列印的元素 */
+            header .header-actions, .input-panel {
+                display: none;
+            }
+            header {
+                border-bottom: 2px solid #000;
+                box-shadow: none;
+                position: static;
+                padding: 0;
+                margin-bottom: 20px;
+            }
+            .container {
+                height: auto;
+                display: block;
+            }
+            .output-panel {
+                overflow: visible;
+                padding: 0;
+                max-width: 100%;
+            }
+
+            /* 將浮水印圖層移到最上方 (z-index: 9999) 並設為透明 */
+            .print-watermark {
+                display: block;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background-image: url('logo.png');
+                background-repeat: repeat; /* 可改為 no-repeat，background-position: center 來居中 */
+                background-position: center;
+                background-size: 50%;
+                opacity: 0.15; /* 調整透明度 */
+                z-index: 9999;
+                pointer-events: none; /* 確保不會阻擋點擊或滑鼠事件 */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 列印用最上層浮水印 -->
+    <div class="print-watermark"></div>
+
+    <!-- 頂部表頭 -->
+    <header>
+        <div class="brand">
+            <img src="logo.png" alt="傑昇 HVAC&R" class="logo" onerror="this.alt='LOGO未找到'">
+            <h1>泳池熱負荷計算</h1>
+        </div>
+        <div class="header-actions">
+            <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importData(event)">
+            <button onclick="document.getElementById('importFile').click()">📂 匯入數據</button>
+            <button onclick="exportData()">💾 匯出數據</button>
+            <button onclick="window.print()">🖨️ 預覽 / 列印</button>
+        </div>
+    </header>
+
+    <!-- 主體內容 -->
+    <div class="container">
+        <!-- 左側輸入區 -->
+        <div class="input-panel">
+            <div class="input-header">
+                <h2>參數輸入</h2>
+                <!-- 按鈕移至此處 -->
+                <button type="submit" class="btn-calc" form="calcForm">執行計算 ▶</button>
+            </div>
+            
+            <form id="calcForm" onsubmit="event.preventDefault(); calculate();">
+                <div class="form-group">
+                    <label>泳池表面積 A (m²)</label>
+                    <input type="number" id="poolArea" step="0.1" value="100" required>
+                </div>
+                <div class="form-group">
+                    <label>池水溫度 T_w (°C)</label>
+                    <input type="number" id="waterTemp" step="0.1" value="28" required>
+                </div>
+                <div class="form-group">
+                    <label>室內空氣溫度 T_a (°C)</label>
+                    <input type="number" id="airTemp" step="0.1" value="30" required>
+                </div>
+                <div class="form-group">
+                    <label>室內相對濕度 RH (%)</label>
+                    <input type="number" id="airRh" step="0.1" value="60" required>
+                </div>
+                <div class="form-group">
+                    <label>水面風速 V (m/s)[預設室內0.2~0.3]</label>
+                    <input type="number" id="windSpeed" step="0.01" value="0.2" required>
+                </div>
+                
+                <!-- 活動係數新增情境選單 -->
+                <div class="form-group">
+                    <label>活動係數 γ</label>
+                    <div class="flex-row">
+                        <select id="activitySelect" style="flex: 2;" onchange="document.getElementById('activityFactor').value = this.value">
+                            <option value="0.5">私人泳池 (0.5)</option>
+                            <option value="1.0" selected>一般室內泳池 (1.0)</option>
+                            <option value="1.5">公共泳池/造浪池 (1.5)</option>
+                            <option value="2.0">水上樂園/戲水池 (2.0)</option>
+                        </select>
+                        <input type="number" id="activityFactor" step="0.1" value="1.0" style="flex: 1;" required>
+                    </div>
+                </div>
+
+                <!-- 新增水補充參數 -->
+                <div style="border-top: 1px dashed #ccc; margin: 20px 0;"></div>
+                <div class="form-group">
+                    <label>每日補充水量 V_f (m³/day)</label>
+                    <input type="number" id="makeupWater" step="0.1" value="5" required>
+                </div>
+                <div class="form-group">
+                    <label>補充冷水溫度 T_f (°C)</label>
+                    <input type="number" id="makeupTemp" step="0.1" value="15" required>
+                </div>
+            </form>
+        </div>
+
+        <!-- 右側輸出區 -->
+        <div class="output-panel" id="outputArea">
+            <h2 style="text-align: center; color: #555; margin-top: 50px;">請點擊「執行計算」以顯示結果與過程。</h2>
+        </div>
+    </div>
+
+    <!-- JavaScript 運算邏輯 -->
+    <script>
+        // 計算飽和蒸汽壓 (使用 Antoine 方程式，結果為 mmHg)
+        function getVaporPressure(tempC) {
+            const A = 8.07131;
+            const B = 1730.63;
+            const C = 233.426;
+            return Math.pow(10, A - (B / (C + tempC)));
+        }
+
+        // 四捨五入至小數點後兩位
+        function round2(num) {
+            return Math.round(num * 100) / 100;
+        }
+
+        // 負數自動加上括弧格式化
+        function formatVal(num) {
+            const rounded = round2(num);
+            return rounded < 0 ? `(${rounded})` : rounded;
+        }
+
+        // 主要計算函式
+        function calculate() {
+            // 1. 取得輸入值
+            const A = parseFloat(document.getElementById('poolArea').value);
+            const Tw = parseFloat(document.getElementById('waterTemp').value);
+            const Ta = parseFloat(document.getElementById('airTemp').value);
+            const RH = parseFloat(document.getElementById('airRh').value);
+            const V = parseFloat(document.getElementById('windSpeed').value);
+            const gamma = parseFloat(document.getElementById('activityFactor').value);
+            const Vf = parseFloat(document.getElementById('makeupWater').value);
+            const Tf = parseFloat(document.getElementById('makeupTemp').value);
+
+            // 2. 物理量計算
+            const Pw = getVaporPressure(Tw);
+            const Pa_sat = getVaporPressure(Ta);
+            const Pa = Pa_sat * (RH / 100);
+
+            // 蒸發量 W (kg/h) 
+            const windFactor = 0.0174 * V + 0.0229;
+            const W = A * gamma * windFactor * (Pw - Pa);
+
+            // 蒸發散熱量 Qe (kcal/h)
+            const Qe = W * 580;
+
+            // 表面傳導散熱量 Qc (kcal/h)
+            const Qc_simplified = 5 * A * (Tw - Ta);
+
+            // 維持恆溫基礎熱量 Q_total (kcal/h)
+            const Q_total_kcal = Qe + Qc_simplified;
+
+            // 新水補充加熱量 Qf (kcal/h)
+            // 公式: Qf = (Vf / 24) m3/h * 1000 kg/m3 * 1 kcal/kg.C * (Tw - Tf)
+            const q_h = Vf / 24; // 每小時補水量
+            const Qf = q_h * 1000 * (Tw - Tf);
+
+            // 總設備熱負荷 Q_all
+            const Q_all_kcal = Q_total_kcal + Qf;
+            const Q_all_kW = Q_all_kcal / 860;
+
+            // 3. 渲染結果到畫面 (利用 formatVal 處理負數顯示)
+            const outputHTML = `
+                <h1 style="text-align:center; border-bottom: 2px solid #0078D7; padding-bottom: 10px;">泳池熱負荷計算報告</h1>
+                
+                <div class="calc-step">
+                    <h3>1. 參數確認與蒸汽壓計算</h3>
+                    <p>水溫飽和蒸汽壓 ($P_w$)：</p>
+                    <div class="formula">P_w = 10^(8.07131 - 1730.63 / (233.426 + T_w))</div>
+                    <div class="substitution">P_w = 10^(8.07131 - 1730.63 / (233.426 + ${Tw})) = <strong>${round2(Pw)} mmHg</strong></div>
+                    
+                    <p>空氣實際蒸汽壓 ($P_a$)：</p>
+                    <div class="formula">P_a = P_{sat}(T_a) × (RH / 100)</div>
+                    <div class="substitution">P_a = ${round2(Pa_sat)} × (${RH} / 100) = <strong>${round2(Pa)} mmHg</strong></div>
+                </div>
+
+                <div class="calc-step">
+                    <h3>2. 水面蒸發量計算 (W)</h3>
+                    <div class="formula">W = A × γ × (0.0174 × V + 0.0229) × (P_w - P_a)</div>
+                    <div class="substitution">代入數據：W = ${A} × ${gamma} × (0.0174 × ${V} + 0.0229) × (${round2(Pw)} - ${round2(Pa)})</div>
+                    <div class="result-highlight">計算結果：W = ${formatVal(W)} kg/h</div>
+                </div>
+
+                <div class="calc-step">
+                    <h3>3. 蒸發散熱量 (Q_e)</h3>
+                    <p>汽化潛熱 $r$ 取 580 kcal/kg：</p>
+                    <div class="formula">Q_e = W × 580</div>
+                    <div class="substitution">代入數據：Q_e = ${formatVal(W)} × 580</div>
+                    <div class="result-highlight">計算結果：Q_e = ${formatVal(Qe)} kcal/h</div>
+                </div>
+
+                <div class="calc-step">
+                    <h3>4. 表面傳導對流散熱量 (Q_c)</h3>
+                    <div class="formula">Q_c = 5 × A × (T_w - T_a)</div>
+                    <div class="substitution">代入數據：Q_c = 5 × ${A} × (${Tw} - ${Ta})</div>
+                    <div class="result-highlight">計算結果：Q_c = ${formatVal(Qc_simplified)} kcal/h</div>
+                </div>
+
+                <div class="calc-step">
+                    <h3>5. 基礎維持加熱量 (Q_total)</h3>
+                    <p>維持蒸發與表面散熱之基礎熱量 (尚未計入新水)：</p>
+                    <div class="formula">Q_{total} = Q_e + Q_c</div>
+                    <div class="substitution">Q_{total} = ${formatVal(Qe)} + ${formatVal(Qc_simplified)}</div>
+                    <div class="result-highlight">計算結果：Q_{total} = ${formatVal(Q_total_kcal)} kcal/h</div>
+                </div>
+
+                <div class="calc-step">
+                    <h3>6. 新水補充加熱量 (Q_f)</h3>
+                    <p>依每日補水量換算每小時所需加熱量：</p>
+                    <div class="formula">Q_f = (V_f / 24) × 1000 × (T_w - T_f)</div>
+                    <div class="substitution">代入數據：Q_f = (${Vf} / 24) × 1000 × (${Tw} - ${Tf})</div>
+                    <div class="result-highlight">計算結果：Q_f = ${formatVal(Qf)} kcal/h</div>
+                </div>
+
+                <div class="calc-step" style="background:#e8f5e9; border-color:#28a745;">
+                    <h3 style="color:#218838;">7. 總設備熱負荷加總 (Q_all)</h3>
+                    <p>包含泳池基礎維持與新水補充之總計加熱負荷：</p>
+                    <div class="formula">Q_{all} = Q_{total} + Q_f</div>
+                    <div class="substitution">Q_{all} = ${formatVal(Q_total_kcal)} + ${formatVal(Qf)}</div>
+                    <div class="result-highlight" style="font-size: 1.5em;">
+                        總維持加熱量 = ${formatVal(Q_all_kcal)} kcal/h<br>
+                        等效電功率 = ${formatVal(Q_all_kW)} kW
+                    </div>
+                </div>
+            `;
+            document.getElementById('outputArea').innerHTML = outputHTML;
+        }
+
+        // 匯出功能 (包含新欄位)
+        function exportData() {
+            const data = {
+                poolArea: document.getElementById('poolArea').value,
+                waterTemp: document.getElementById('waterTemp').value,
+                airTemp: document.getElementById('airTemp').value,
+                airRh: document.getElementById('airRh').value,
+                windSpeed: document.getElementById('windSpeed').value,
+                activityFactor: document.getElementById('activityFactor').value,
+                makeupWater: document.getElementById('makeupWater').value,
+                makeupTemp: document.getElementById('makeupTemp').value
+            };
+            const jsonStr = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonStr], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "泳池計算參數_" + new Date().getTime() + ".json";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // 匯入功能 (讀取 JSON 檔案)
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if(data.poolArea) document.getElementById('poolArea').value = data.poolArea;
+                    if(data.waterTemp) document.getElementById('waterTemp').value = data.waterTemp;
+                    if(data.airTemp) document.getElementById('airTemp').value = data.airTemp;
+                    if(data.airRh) document.getElementById('airRh').value = data.airRh;
+                    if(data.windSpeed) document.getElementById('windSpeed').value = data.windSpeed;
+                    
+                    if(data.activityFactor) {
+                        document.getElementById('activityFactor').value = data.activityFactor;
+                        // 同步選單 (如果找不到相符的會保持預設)
+                        const selectElement = document.getElementById('activitySelect');
+                        for(let i=0; i<selectElement.options.length; i++) {
+                            if(selectElement.options[i].value == data.activityFactor) {
+                                selectElement.selectedIndex = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    if(data.makeupWater) document.getElementById('makeupWater').value = data.makeupWater;
+                    if(data.makeupTemp) document.getElementById('makeupTemp').value = data.makeupTemp;
+                    
+                    alert("參數匯入成功！");
+                    calculate(); // 匯入後自動計算
+                } catch (err) {
+                    alert("檔案格式錯誤，請選擇由本系統匯出的 JSON 檔案。");
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+    </script>
+</body>
+</html>
