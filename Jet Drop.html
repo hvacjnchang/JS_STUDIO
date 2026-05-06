@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ 空調送風性能動態計算儀 ⚡</title>
+    <style>
+        /* CSS 變數定義 (色彩、主題) */
+        :root {
+            --header-h: 90px;
+            --c-main: #3b82f6;      /* 藍色系主色 */
+            --c-gradient: linear-gradient(135deg, #0ea5e9, #6366f1);
+            --c-bg: #f0f4f8;        /* 網頁主底色 */
+            --c-panel: #ffffff;
+            --c-text: #1f2937;
+            --c-text-light: #6b7280;
+            --border-radius: 12px;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-hover: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        /* 基礎重置 */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: "Segoe UI", "Microsoft JhengHei", Arial, sans-serif; background-color: var(--c-bg); color: var(--c-text); overflow: hidden; }
+
+        /* ================= 佈局 (Layout) ================= */
+        header {
+            position: fixed; top: 0; left: 0; right: 0; height: var(--header-h);
+            background: var(--c-gradient); color: white; display: flex;
+            align-items: center; justify-content: space-between; padding: 0 30px;
+            box-shadow: var(--shadow); z-index: 1000;
+        }
+
+        .header-title { display: flex; align-items: center; }
+        .header-title img { height: 45px; margin-right: 15px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2)); }
+        .header-title h1 { font-size: 24px; font-weight: 700; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; }
+        .header-title span { font-size: 14px; opacity: 0.9; margin-left: 10px; font-weight: 400;}
+
+        .toolbar { display: flex; gap: 10px; align-items: center; }
+        .btn {
+            background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white;
+            padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease;
+            display: inline-flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); font-size: 14px;
+        }
+        .btn:hover { background: rgba(255,255,255,0.4); transform: translateY(-2px); box-shadow: var(--shadow); }
+        .btn-print { background: #10b981; border-color: #059669; }
+        .btn-print:hover { background: #34d399; }
+        
+        /* 單位選擇器樣式 */
+        .unit-select { background: #ffffff; color: #1f2937; border: 1px solid #cbd5e1; font-weight: bold; outline: none; }
+        .unit-select:hover { background: #f8fafc; color: #3b82f6; }
+
+        /* 中間切割內容區 */
+        .content-wrapper {
+            margin-top: var(--header-h); height: calc(100vh - var(--header-h));
+            display: flex; gap: 20px; padding: 20px;
+        }
+
+        /* 輸入區與輸出區容器 */
+        .panel {
+            background-color: var(--c-panel); border-radius: var(--border-radius); box-shadow: var(--shadow);
+            padding: 30px; overflow-y: auto; height: 100%; transition: all 0.3s;
+        }
+        
+        .panel::-webkit-scrollbar { width: 8px; }
+        .panel::-webkit-scrollbar-track { background: transparent; }
+        .panel::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .panel::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .input-panel { flex: 0 0 350px; border-top: 5px solid #0ea5e9; }
+        .output-panel { flex: 1; border-top: 5px solid #10b981; }
+
+        .panel-title { font-size: 1.2rem; margin-bottom: 25px; display: flex; align-items: center; color: var(--c-main); font-weight: 700; border-bottom: 2px solid var(--c-bg); padding-bottom: 10px;}
+        .panel-title i { margin-right: 10px; font-size: 1.5rem; }
+
+        /* ================= 格式表單設定 ================= */
+        .form-group { margin-bottom: 20px; position: relative; }
+        .form-group label { display: block; font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; color: var(--c-text); }
+        .form-group label span { font-weight: 400; color: var(--c-text-light); font-size: 0.85rem;}
+        
+        .input-box {
+            width: 100%; padding: 12px 15px; border-radius: 8px; border: 2px solid #e2e8f0; font-size: 1rem;
+            outline: none; transition: border-color 0.3s, box-shadow 0.3s; background: #f8fafc; font-family: monospace;
+        }
+        .input-box:focus { border-color: var(--c-main); background: #ffffff; box-shadow: 0 0 0 3px rgba(59,130,246,0.2); }
+
+        /* ================= 結果與動畫 ================= */
+        .result-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px;}
+        .card { 
+            background: #eff6ff; padding: 20px; border-radius: var(--border-radius); border-left: 5px solid var(--c-main);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: 0.3s; animation: fadeIn 0.5s ease-out;
+        }
+        .card:hover { transform: translateY(-5px); box-shadow: var(--shadow-hover); }
+        .card p.label { font-size: 0.9rem; color: var(--c-text-light); font-weight: bold; margin-bottom: 10px;}
+        .card p.value { font-size: 1.8rem; color: var(--c-text); font-weight: 900; }
+        .card p.value span { font-size: 1rem; color: var(--c-text-light); font-weight: 500;}
+
+        /* 詳細公式推導區預覽風格 */
+        .calc-steps { background-color: #eff6ff; color: #334155; padding: 20px; border-radius: var(--border-radius); font-family: "Courier New", Courier, monospace; font-size: 0.95rem; line-height: 1.6; border: 1px solid #bfdbfe; }
+        .step-title { color: #0284c7; font-weight: bold; font-size: 1.1rem; margin-top: 15px; margin-bottom: 5px; page-break-after: avoid; }
+        .calc-code { background: #ffffff; color: #0f172a; padding: 10px; border-radius: 6px; display: block; margin-top: 5px; word-break: break-all; border: 1px solid #e2e8f0; box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);}
+        .accent-hl { color: #ea580c; font-weight: bold; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ================= 列印與隱藏區域 (關鍵核心功能) ================= */
+        #print-container { display: none; background: white; width: 100%; min-height: 100vh;}
+        input[type="file"] { display: none; }
+
+        @media print {
+            /* 浮水印設定：最上層、半透明、滿版 */
+            body::after {
+                content: "";
+                position: fixed;
+                top: 0; left: 0; width: 100vw; height: 100vh;
+                background-image: url('LOGO.png');
+                background-repeat: repeat;
+                background-position: center;
+                background-size: 300px;
+                opacity: 0.08;
+                z-index: 9999;
+                pointer-events: none;
+            }
+
+            @page { margin: 10mm; } /* 縮小邊距以濃縮頁面 */
+            body { overflow: visible; background-color: white; font-size: 12px; }
+            header, .content-wrapper { display: none !important; }
+            #print-container {
+                display: block; width: 100%; box-sizing: border-box; color: black !important;
+            }
+            .print-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 5px; text-align: center;}
+            .print-header h1 { font-size: 18px; margin-bottom: 5px;}
+            h3 { font-size: 14px; margin-top: 12px; margin-bottom: 6px; }
+            
+            /* 表格設定：允許跨頁流動，縮小間距 */
+            .print-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+            .print-table th, .print-table td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; font-size: 12px;}
+            .print-table th { background-color: #f5f5f5 !important; -webkit-print-color-adjust: exact; width: 40%;}
+            
+            /* 公式區塊設定：取消 page-break-inside: avoid 允許自然跨頁，避免大片空白 */
+            .print-formula { background: #fafafa !important; -webkit-print-color-adjust: exact; border: 1px solid #eee; padding: 8px; font-family: monospace; border-left: 5px solid #666; margin-bottom: 8px; font-size: 11px; line-height: 1.3; white-space: pre-wrap; page-break-inside: auto;}
+            
+            .signature { margin-top: 20px; display: flex; justify-content: flex-end; page-break-inside: avoid;}
+            .signature div { border-top: 1px solid black; width: 200px; text-align: center; padding-top: 5px; margin-right: 20px; font-size: 12px;}
+        }
+
+        @media (max-width: 800px) {
+            .content-wrapper { flex-direction: column; overflow: hidden; }
+            .input-panel { flex: none; height: auto; max-height: 40%; }
+            .output-panel { height: 100%; }
+            header .header-title span { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 固定表頭區 -->
+    <header>
+        <div class="header-title">
+            <img src="LOGO.png" alt="LOGO" onerror="this.style.display='none'">
+            <h1>氣流動態儀 <span>HVAC Jet Drop Calculator</span></h1>
+        </div>
+        <div class="toolbar">
+            <!-- 單位切換器 -->
+            <select id="unitSelect" class="btn unit-select" onchange="handleUnitChange()">
+                <option value="metric">公制 (Metric)</option>
+                <option value="imperial">英制 (Imperial)</option>
+                <option value="si">SI制 (SI)</option>
+            </select>
+            <button class="btn" onclick="document.getElementById('importFile').click()">📂 匯入參數</button>
+            <input type="file" id="importFile" accept=".json" onchange="importParams(event)">
+            <button class="btn" onclick="exportParams()">📥 匯出配置</button>
+            <button class="btn btn-print" onclick="window.print()">🖨️ 預覽與列印報告</button>
+        </div>
+    </header>
+
+    <!-- UI分區內容區 -->
+    <div class="content-wrapper">
+        <!-- 輸入區域 -->
+        <div class="panel input-panel">
+            <h2 class="panel-title">🎛️ 輸入參數 (自動重算)</h2>
+            <form id="calc-form">
+                <div class="form-group">
+                    <label>離地距離 (H_floor) <span id="lbl_Hg">高度 m</span></label>
+                    <input type="number" id="param_Hg" class="input-box" step="0.1" value="3.0" min="0" required oninput="computeAndRender()">
+                </div>
+                <div class="form-group">
+                    <label>離天花板距離 (H_ceil) <span id="lbl_Hc">影響康達效應 m</span></label>
+                    <input type="number" id="param_Hc" class="input-box" step="0.05" value="0.2" min="0" required oninput="computeAndRender()">
+                </div>
+                <div class="form-group">
+                    <label>出風口送風量 (Q) <span id="lbl_Q">空氣量 CMH (m³/h)</span></label>
+                    <input type="number" id="param_Q" class="input-box" step="50" value="600" min="1" required oninput="computeAndRender()">
+                </div>
+                <div class="form-group">
+                    <label>出風口有效面積 (Ak) <span id="lbl_A">為確保物理運算之必要 m²</span></label>
+                    <input type="number" id="param_A" class="input-box" step="0.01" value="0.06" min="0.001" required oninput="computeAndRender()">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>氣流達標風速 (Vt) <span id="lbl_Vt">檢視落點邊界風速 m/s</span></label>
+                    <input type="number" id="param_Vt" class="input-box" step="0.05" value="0.25" min="0.01" required oninput="computeAndRender()">
+                </div>
+            </form>
+        </div>
+
+        <!-- 輸出區域 -->
+        <div class="panel output-panel">
+            <h2 class="panel-title">✨ 動態運算結果 & 公式解構</h2>
+            
+            <div class="result-dashboard">
+                <div class="card" style="border-left-color: #10b981;">
+                    <p class="label">💨 最大射程水平距離 (X)</p>
+                    <p class="value" id="res_X">-- <span></span></p>
+                </div>
+                <div class="card" style="border-left-color: #8b5cf6;">
+                    <p class="label">🔽 風束下降段落偏移量 (Y)</p>
+                    <p class="value" id="res_Y">-- <span></span></p>
+                </div>
+                <div class="card" style="border-left-color: #ef4444;">
+                    <p class="label">📏 到達時終端高度 (離地)</p>
+                    <p class="value" id="res_H">-- <span></span></p>
+                </div>
+            </div>
+
+            <div class="calc-steps" id="calc-gui-preview">
+                <!-- JS 自動更新顯示完整詳細過程 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 報表列印專區 -->
+    <div id="print-container"></div>
+
+    <!-- ===== JS 運算核心代碼 ====== -->
+    <script>
+        // 單位系統定義
+        const unitConfig = {
+            metric:   { L: 'm', A: 'm²', V: 'm/s', Q: 'CMH (m³/h)', L_name: '公尺', V_name: 'm/s' },
+            imperial: { L: 'ft', A: 'ft²', V: 'fpm', Q: 'CFM (ft³/min)', L_name: '英呎', V_name: 'fpm' },
+            si:       { L: 'm', A: 'm²', V: 'm/s', Q: 'm³/s', L_name: '公尺', V_name: 'm/s' }
+        };
+        let currentUnit = 'metric';
+
+        /**
+         * 處理單位切換與數值自動換算
+         */
+        function handleUnitChange() {
+            const newUnit = document.getElementById('unitSelect').value;
+            if (newUnit === currentUnit) return;
+
+            let Hg = parseFloat(document.getElementById('param_Hg').value) || 0;
+            let Hc = parseFloat(document.getElementById('param_Hc').value) || 0;
+            let Q  = parseFloat(document.getElementById('param_Q').value) || 0;
+            let A  = parseFloat(document.getElementById('param_A').value) || 0;
+            let Vt = parseFloat(document.getElementById('param_Vt').value) || 0;
+
+            // 1. 先將當前數值轉回公制 (Metric) 作為基準
+            if (currentUnit === 'imperial') {
+                Hg /= 3.28084;
+                Hc /= 3.28084;
+                A  /= 10.76391;
+                Vt /= 196.85039;
+                Q  *= 1.69901; // CFM to CMH
+            } else if (currentUnit === 'si') {
+                Q  *= 3600; // m³/s to CMH
+            }
+
+            // 2. 將公制基準轉換為目標單位
+            if (newUnit === 'imperial') {
+                Hg *= 3.28084;
+                Hc *= 3.28084;
+                A  *= 10.76391;
+                Vt *= 196.85039;
+                Q  /= 1.69901;
+            } else if (newUnit === 'si') {
+                Q  /= 3600;
+            }
+
+            // 更新輸入框數值
+            document.getElementById('param_Hg').value = Hg.toFixed(2);
+            document.getElementById('param_Hc').value = Hc.toFixed(2);
+            document.getElementById('param_Q').value = (newUnit === 'si') ? Q.toFixed(3) : Q.toFixed(0);
+            document.getElementById('param_A').value = A.toFixed(3);
+            document.getElementById('param_Vt').value = Vt.toFixed(2);
+
+            // 更新標籤文字
+            document.getElementById('lbl_Hg').innerText = `高度 ${unitConfig[newUnit].L}`;
+            document.getElementById('lbl_Hc').innerText = `影響康達效應 ${unitConfig[newUnit].L}`;
+            document.getElementById('lbl_Q').innerText = `空氣量 ${unitConfig[newUnit].Q}`;
+            document.getElementById('lbl_A').innerText = `為確保物理運算之必要 ${unitConfig[newUnit].A}`;
+            document.getElementById('lbl_Vt').innerText = `檢視落點邊界風速 ${unitConfig[newUnit].V}`;
+
+            currentUnit = newUnit;
+            computeAndRender();
+        }
+
+        /** 
+         * 計算氣流軌跡的實做演算法
+         */
+        function computeAndRender() {
+            const val = id => parseFloat(document.getElementById(id).value) || 0.001;
+            let Hg_in = val('param_Hg');
+            let Hc_in = val('param_Hc');
+            let Q_in  = val('param_Q');
+            let A_in  = val('param_A');
+            let Vt_in = val('param_Vt');
+
+            // === 統一轉換為公制進行物理運算 ===
+            let Hg = Hg_in, Hc = Hc_in, Q = Q_in, A = A_in, Vt = Vt_in;
+            let conversionLog = "";
+
+            if (currentUnit === 'imperial') {
+                Hg = Hg_in / 3.28084;
+                Hc = Hc_in / 3.28084;
+                Q  = Q_in * 1.69901;
+                A  = A_in / 10.76391;
+                Vt = Vt_in / 196.85039;
+                conversionLog = `
+<div class="step-title">📍 Step 0 - 單位系統標準化 (英制轉公制)</div>
+<span class="calc-code">H_floor = ${Hg_in} ft ÷ 3.28084 = ${Hg.toFixed(2)} m
+H_ceil = ${Hc_in} ft ÷ 3.28084 = ${Hc.toFixed(2)} m
+Q = ${Q_in} CFM × 1.699 = ${Q.toFixed(0)} CMH
+Ak = ${A_in} ft² ÷ 10.7639 = ${A.toFixed(3)} m²
+Vt = ${Vt_in} fpm ÷ 196.85 = ${Vt.toFixed(2)} m/s</span>`;
+            } else if (currentUnit === 'si') {
+                Q = Q_in * 3600;
+                conversionLog = `
+<div class="step-title">📍 Step 0 - 單位系統標準化 (SI制轉公制)</div>
+<span class="calc-code">Q = ${Q_in} m³/s × 3600 = ${Q.toFixed(0)} CMH</span>`;
+            }
+
+            // === A. 基礎單位轉換 ===
+            let q_sec = Q / 3600;                     // (m³/s) 風速體積流
+            let V0    = q_sec / A;                    // (m/s)  初始風速
+            
+            // === B. 計算貼附(增幅)射程與阻滯常數 ===
+            let coanda = (Hc <= 0.3) ? 1.4 : 1.0;     // 天花貼壁增益因子 
+            let K_base = 4.8;                         // 典型散流氣流系數
+            let K      = K_base * coanda;             // 複合噴流擴張指數
+
+            // === C. 計算指定達標風速所在投射範圍之投射距離(水平) X ===
+            let rootA = Math.sqrt(A);
+            let X = (K * q_sec) / (Vt * rootA);       
+
+            // === D. 考慮噴灑動能與散溢造成之下沈推斷(垂直偏差 Y) ===
+            let Y_drop = (0.045 * Math.pow(X, 1.6)) / V0; 
+            
+            // === E. 最後推算終端落地前空心實際高度 ====
+            let H_terminal = Hg - Y_drop;
+            let touchedGround = false;
+            if(H_terminal < 0) {
+                H_terminal = 0;
+                touchedGround = true;
+            }
+
+            // === 將結果轉回使用者選擇的單位 ===
+            let X_out = X, Y_out = Y_drop, H_out = H_terminal;
+            let uName = unitConfig[currentUnit].L_name;
+            
+            if (currentUnit === 'imperial') {
+                X_out = X * 3.28084;
+                Y_out = Y_drop * 3.28084;
+                H_out = H_terminal * 3.28084;
+            }
+
+            // 更新儀表版顯示 UI
+            document.getElementById('res_X').innerHTML = `${X_out.toFixed(2)} <span>${uName}</span>`;
+            document.getElementById('res_Y').innerHTML = `${Y_out.toFixed(2)} <span>${uName}</span>`;
+            document.getElementById('res_H').innerHTML = `${H_out.toFixed(2)} <span>${uName} ${touchedGround ? '(已觸地)' : ''}</span>`;
+
+            // === 產生完整帶參數之「字串解析」提供計算歷程展演 ===
+            const htmlLog = conversionLog + `
+<div class="step-title">📍 Step 1 - 物理運算基準值整理 (公制)</div>
+H_floor = <span class="accent-hl">${Hg.toFixed(2)} m</span>, H_ceil = <span class="accent-hl">${Hc.toFixed(2)} m</span>
+AirFlow Q = <span class="accent-hl">${Q.toFixed(0)} CMH</span>, Area Ak = <span class="accent-hl">${A.toFixed(3)} m²</span>, Terminal V = <span class="accent-hl">${Vt.toFixed(2)} m/s</span>
+
+<div class="step-title">📍 Step 2 - 基本動力換算</div>
+(1) 風積秒量轉換 q = Q / 3600
+<span class="calc-code">q = ${Q.toFixed(0)} / 3600 = ${q_sec.toFixed(4)} m³/s</span>
+(2) 出風口初速演算 V0 = q / Area
+<span class="calc-code">V0 = ${q_sec.toFixed(4)} / ${A.toFixed(3)} = <span class="accent-hl">${V0.toFixed(2)} m/s</span></span>
+
+<div class="step-title">📍 Step 3 - Coanda 天花板增距效應因子建立</div>
+因為 天花板距 (${Hc.toFixed(2)}m) ${Hc <= 0.3 ? '≤ 0.3m (啟用)' : '> 0.3m (無貼附發生)'}
+=> Coanda Factor (Kc) = <span class="accent-hl">${coanda}</span>.  總投射基數 K = ${K_base} * ${coanda} = ${K.toFixed(1)}
+
+<div class="step-title">📍 Step 4 - 推估目標水平投射直線射程 (X)</div>
+運用等溫核心漸擴延推法: X = K *[ q / ( Vt * √Area ) ]
+<span class="calc-code">X = ${K.toFixed(1)} *[ ${q_sec.toFixed(4)} / (${Vt.toFixed(2)} * ${(rootA).toFixed(4)}) ]
+X = ${K.toFixed(1)} * ${ (q_sec / (Vt * rootA)).toFixed(4) } = <span class="accent-hl">${X.toFixed(3)} m</span></span>
+
+<div class="step-title">📍 Step 5 - 落降流拋射修正垂距偏移推算 (Y)</div>
+將動量衰變及自由掉落軌跡擬合：Y = 0.045 * ( X ^ 1.6 ) / 初速V0
+<span class="calc-code">Y = 0.045 * ( ${X.toFixed(3)} ^ 1.6 ) / ${V0.toFixed(2)} 
+Y = 0.045 * ${(Math.pow(X, 1.6)).toFixed(3)} / ${V0.toFixed(2)} = <span class="accent-hl">${Y_drop.toFixed(3)} m</span></span>
+
+<div class="step-title">📍 Step 6 - 解析目標空間距離終端定位高度 (H_end)</div>
+公式為：落地空距預設底限高度 (Hg) 減除 落降偏差位 (Y)
+<span class="calc-code">H_end = ${Hg.toFixed(2)} - ${Y_drop.toFixed(3)} = <span class="accent-hl">${H_terminal.toFixed(3)} m</span>${touchedGround ? ' => (依自然限制判定修正為 0, 接觸地表阻截) ' : ''}</span>
+<br><span style="color:#059669; font-weight:bold;">[完成] 模型收束所有輸出並套用至畫面更新！</span>`;
+            
+            document.getElementById('calc-gui-preview').innerHTML = htmlLog;
+            
+            // 傳遞給列印模組 (包含原始輸入值與最終輸出值)
+            buildPrintDocument(Hg_in, Hc_in, Q_in, A_in, Vt_in, X_out, Y_out, H_out, htmlLog, unitConfig[currentUnit]);
+        }
+
+        // 建置列印專用 DOM
+        function buildPrintDocument(Hg, Hc, Q, A, Vt, X, Y, H, detailLogRaw, uCfg) {
+            
+            // 移除列印時不需要的「[完成]...」文字，並轉換樣式
+            let printReadyLog = detailLogRaw
+                 .replace(/accent-hl/g, '') 
+                 .replace(/calc-code/g, 'print-formula')
+                 .replace(/<br><span style="color:#059669; font-weight:bold;">\[完成\] 模型收束所有輸出並套用至畫面更新！<\/span>/g, '')
+                 .replace(/<span class="print-formula">/g, '<div class="print-formula">') 
+                 .replace(/<\/span><\/div>/g, '</div></div>'); 
+            
+            let htmlStr = `
+                <div class="print-header">
+                    <h1>💨 建築空調設備之單點射流性能評估報告書</h1>
+                </div>
+                
+                <h3>【1 - 輸入環境與物理設備建構值】</h3>
+                <table class="print-table">
+                    <tr><th>高度距地面水準距離 (Hg)</th><td>${Hg} ${uCfg.L}</td></tr>
+                    <tr><th>天花裝配安裝頂離度 (Hc)</th><td>${Hc} ${uCfg.L}</td></tr>
+                    <tr><th>標定體積給風輸出能量 (Q)</th><td>${Q} ${uCfg.Q}</td></tr>
+                    <tr><th>機電散流口本體實際面積(Ak)</th><td>${A} ${uCfg.A}</td></tr>
+                    <tr><th>分析要求目標送抵達風速(Vt)</th><td>${Vt} ${uCfg.V}</td></tr>
+                </table>
+
+                <!-- 將輸出結果表格與備註移至第一段表格下方 -->
+                <table class="print-table">
+                    <tr>
+                        <th style="background:#def7ec!important; text-align:center;">橫推距離(Throw)最大探底達(${Vt}${uCfg.V}) X落點處 </th>
+                        <td style="font-weight:bold; font-size:1.2rem; text-align:center;">🎯 ${X.toFixed(2)} ${uCfg.L_name}</td>
+                    </tr>
+                    <tr>
+                        <th style="background:#e0f2fe!important; text-align:center;">目標發生偏移點預判之落盤終距高度 Y降差</th>
+                        <td style="font-weight:bold; font-size:1.2rem; text-align:center;">⏬ ${Y.toFixed(2)} ${uCfg.L_name}</td>
+                    </tr>
+                    <tr>
+                        <th style="background:#ffe4e6!important; text-align:center;">當達標 (${Vt}${uCfg.V}) 風線水平之點對於實地板空間之實際高點(H)</th>
+                        <td style="font-weight:bold; font-size:1.2rem; text-align:center; color:#e11d48;">📌 ${H.toFixed(2)} ${uCfg.L_name} (距地空高)</td>
+                    </tr>
+                </table>
+                <p style="font-size:11px; color:#777; font-style:italic; margin-bottom: 15px;">* 本報警估測結果立基於等溫擴射模型加給阻力氣引物理經驗推衍；實際空間若遭受隔阻回流冷縮熱揚效應會有不可定差數比。工程需配合法規及軟體校正查驗比定。</p>
+
+                <h3>【 2 - 對位動量流場影響力數學建構展開】</h3>
+                ${printReadyLog}
+                
+                <div class="signature">
+                    <div>檢驗/確認人員核章或簽字</div>
+                </div>
+            `;
+            document.getElementById('print-container').innerHTML = htmlStr;
+        }
+
+        /**
+         * 匯出配置檔
+         */
+        function exportParams() {
+            const paramsConfig = {
+                unit: document.getElementById('unitSelect').value,
+                Hg: document.getElementById('param_Hg').value,
+                Hc: document.getElementById('param_Hc').value,
+                Q: document.getElementById('param_Q').value,
+                A: document.getElementById('param_A').value,
+                Vt: document.getElementById('param_Vt').value
+            };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(paramsConfig, null, 2));
+            const nodeLink = document.createElement('a');
+            nodeLink.setAttribute("href", dataStr);
+            nodeLink.setAttribute("download", "HVAC_機組設定_ParamConfig.json");
+            document.body.appendChild(nodeLink);
+            nodeLink.click();
+            nodeLink.remove();
+        }
+
+        /**
+         * 匯入配置檔
+         */
+        function importParams(e) {
+            const selectedFile = e.target.files[0];
+            if (!selectedFile) return;
+
+            const readHandler = new FileReader();
+            readHandler.onload = function(evt) {
+                try {
+                    const paramsContent = JSON.parse(evt.target.result);
+                    
+                    if (paramsContent.unit !== undefined) {
+                        document.getElementById('unitSelect').value = paramsContent.unit;
+                        currentUnit = paramsContent.unit; // 強制同步避免二次換算
+                    }
+                    if (paramsContent.Hg !== undefined) document.getElementById('param_Hg').value = paramsContent.Hg;
+                    if (paramsContent.Hc !== undefined) document.getElementById('param_Hc').value = paramsContent.Hc;
+                    if (paramsContent.Q !== undefined)  document.getElementById('param_Q').value = paramsContent.Q;
+                    if (paramsContent.A !== undefined)  document.getElementById('param_A').value = paramsContent.A;
+                    if (paramsContent.Vt !== undefined) document.getElementById('param_Vt').value = paramsContent.Vt;
+
+                    // 重新觸發單位標籤更新與計算
+                    document.getElementById('unitSelect').dispatchEvent(new Event('change'));
+                    computeAndRender(); 
+                    alert('🟢 資料配置匯入覆寫與讀算完畢！');
+                } catch(error) {
+                    alert('❌ 解析檔案錯誤，可能並非此軟體所生的合格JSON檔。請檢查。');
+                }
+            };
+            readHandler.readAsText(selectedFile);
+            e.target.value = ''; 
+        }
+
+        // 初始化
+        window.onload = () => { computeAndRender(); };
+        
+    </script>
+</body>
+</html>
